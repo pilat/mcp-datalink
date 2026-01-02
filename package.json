@@ -1,6 +1,6 @@
 {
   "name": "@pilat/mcp-datalink",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "MCP server for secure database access (PostgreSQL, MySQL, SQLite)",
   "type": "module",
   "main": "dist/index.js",
@@ -29,7 +29,7 @@
     "claude-code",
     "model-context-protocol"
   ],
-  "author": "pilat",
+  "author": "Vladimir Urushev",
   "repository": {
     "type": "git",
     "url": "https://github.com/pilat/mcp-datalink"

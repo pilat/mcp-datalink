@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/pilat/mcp-datalink/master/.github/logo.png" alt="MCP Datalink" width="120" />
-</p>
-
 <h1 align="center">MCP Datalink</h1>
 
 <p align="center">
@@ -399,30 +395,6 @@ feat(tools): add new database tool
 fix(security): enforce query validation
 docs: update README
 ```
-
-## Roadmap
-
-### Databases
-- [x] PostgreSQL support
-- [x] MySQL support
-- [x] SQLite support
-- [ ] MongoDB support
-- [ ] Redis support
-
-### Security Hardening
-- [ ] MySQL AST parser (replace regex-based parsing)
-- [ ] SQLite AST parser
-- [ ] Production error sanitization mode
-- [ ] Timeout upper bound validation
-- [ ] SQLite path allowlist
-
-### Features
-- [ ] Connection pooling
-- [ ] Query history / audit log
-- [ ] Transaction support
-- [ ] Schema diff between databases
-- [ ] SSH tunnel support
-- [ ] Read replicas routing
 
 ## Links
 
