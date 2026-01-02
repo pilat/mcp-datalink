@@ -1,0 +1,18 @@
+{
+  "databases": {
+    "main": {
+      "url": "postgresql://user:password@localhost:5432/myapp",
+      "readonly": false
+    },
+    "analytics": {
+      "url": "postgresql://readonly:password@analytics.example.com:5432/warehouse",
+      "readonly": true
+    }
+  },
+  "defaults": {
+    "timeout": 30000,
+    "maxRows": 100,
+    "maxCellLength": 500,
+    "maxTotalSize": 65536
+  }
+}

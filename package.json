@@ -1,0 +1,65 @@
+{
+  "name": "@pilat/mcp-datalink",
+  "version": "1.0.0",
+  "description": "MCP server for secure database access (PostgreSQL, MySQL, SQLite)",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "mcp-datalink": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "test": "vitest",
+    "test:unit": "vitest --run --exclude 'src/__integration__/**'",
+    "test:integration": "vitest run --config vitest.config.integration.ts",
+    "test:integration:watch": "vitest --config vitest.config.integration.ts",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "mcp",
+    "database",
+    "postgresql",
+    "mysql",
+    "sqlite",
+    "claude",
+    "claude-code",
+    "model-context-protocol"
+  ],
+  "author": "pilat",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pilat/mcp-datalink"
+  },
+  "license": "MIT",
+  "files": [
+    "dist",
+    "databases.example.json"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "better-sqlite3": "^11.7.0",
+    "mysql2": "^3.6.0",
+    "pg": "^8.11.0",
+    "pgsql-ast-parser": "^12.0.0"
+  },
+  "devDependencies": {
+    "@testcontainers/mysql": "^11.11.0",
+    "@testcontainers/postgresql": "^11.11.0",
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^20.0.0",
+    "@types/pg": "^8.11.0",
+    "testcontainers": "^11.11.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  }
+}

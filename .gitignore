@@ -1,0 +1,16 @@
+node_modules/
+dist/
+*.js
+*.d.ts
+*.js.map
+test-data/
+
+databases.json
+.env
+.env.*
+
+.idea/
+.vscode/
+*.swp
+
+.DS_Store
