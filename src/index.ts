@@ -2,8 +2,6 @@
 
 /**
  * Entry point for mcp-datalink server
- *
- * Parses CLI arguments and starts the MCP server.
  */
 
 import { parseArgs } from 'node:util';
@@ -13,7 +11,6 @@ import { runServer } from './server.js';
 async function main(): Promise<void> {
   const { values } = parseArgs({
     options: {
-      config: { type: 'string', short: 'c' },
       help: { type: 'boolean', short: 'h' },
     },
   });
@@ -22,18 +19,22 @@ async function main(): Promise<void> {
     console.log(`
 mcp-datalink - MCP server for secure database access
 
-Usage: mcp-datalink [options]
+Usage: mcp-datalink
 
-Options:
-  -c, --config <path>  Path to config file (default: databases.json)
-  -h, --help           Show this help message
+Configuration via environment variables:
+  DATALINK_{NAME}_URL       Database connection URL
+  DATALINK_{NAME}_READONLY  Set to "true" for read-only mode
 
-Supported databases: PostgreSQL (MySQL, SQLite coming soon)
+Example:
+  DATALINK_PROD_URL=postgresql://user:pass@host:5432/db
+  DATALINK_PROD_READONLY=true
+
+Supported databases: PostgreSQL, MySQL, SQLite
 `);
     process.exit(0);
   }
 
-  const config = await loadConfig(values.config);
+  const config = loadConfig();
   await runServer(config);
 }
 

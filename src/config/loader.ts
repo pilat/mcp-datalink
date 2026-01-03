@@ -1,7 +1,4 @@
-import { readFile } from 'fs/promises';
-import { homedir } from 'os';
-import { resolve, join } from 'path';
-import type { Config, DatabaseConfig, DefaultsConfig, RawConfig } from '../types.js';
+import type { Config, DatabaseConfig, DefaultsConfig } from '../types.js';
 import { DbMcpError, ErrorCode } from '../utils/errors.js';
 
 const DEFAULT_CONFIG: DefaultsConfig = {
@@ -15,54 +12,23 @@ const DEFAULT_CONFIG: DefaultsConfig = {
 };
 
 /**
- * Try to read and parse a JSON config file.
- * Returns null if file doesn't exist.
- */
-async function tryReadConfigFile(path: string): Promise<RawConfig | null> {
-  try {
-    const content = await readFile(path, 'utf-8');
-    return JSON.parse(content) as RawConfig;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      return null;
-    }
-    throw new DbMcpError(
-      ErrorCode.CONFIG_INVALID,
-      `Failed to parse config file ${path}: ${(err as Error).message}`
-    );
-  }
-}
-
-/**
- * Resolve ${ENV_VAR} placeholders in a string.
- */
-function resolveEnvPlaceholders(value: string): string {
-  return value.replace(/\$\{([^}]+)\}/g, (_, envVar: string) => {
-    const envValue = process.env[envVar];
-    if (envValue === undefined) {
-      throw new DbMcpError(
-        ErrorCode.CONFIG_INVALID,
-        `Environment variable ${envVar} is not defined`
-      );
-    }
-    return envValue;
-  });
-}
-
-/**
- * Extract databases from DB_MCP_{NAME}_URL environment variables.
+ * Extract databases from DATALINK_{NAME}_URL environment variables.
+ * Also supports DATALINK_{NAME}_READONLY=true for read-only mode.
  */
 function getDatabasesFromEnv(): Record<string, DatabaseConfig> {
   const databases: Record<string, DatabaseConfig> = {};
-  const pattern = /^DB_MCP_([A-Z0-9_]+)_URL$/;
+  const urlPattern = /^DATALINK_([A-Z0-9_]+)_URL$/;
 
   for (const [key, value] of Object.entries(process.env)) {
-    const match = key.match(pattern);
+    const match = key.match(urlPattern);
     if (match && value) {
       const name = match[1].toLowerCase();
+      const readonlyKey = `DATALINK_${match[1]}_READONLY`;
+      const readonlyValue = process.env[readonlyKey];
+
       databases[name] = {
         url: value,
-        readonly: false,
+        readonly: readonlyValue === 'true' || readonlyValue === '1',
       };
     }
   }
@@ -71,89 +37,25 @@ function getDatabasesFromEnv(): Record<string, DatabaseConfig> {
 }
 
 /**
- * Load configuration with resolution priority:
- * 1. CLI argument: --config ./path/to/config.json
- * 2. Environment variable: DB_MCP_CONFIG
- * 3. Current directory: ./databases.json
- * 4. Home directory: ~/.config/db-mcp/databases.json
- * 5. ENV-only mode: DB_MCP_{NAME}_URL variables
+ * Load configuration from environment variables.
+ *
+ * Environment variables:
+ *   DATALINK_{NAME}_URL      - Database connection URL (required)
+ *   DATALINK_{NAME}_READONLY - Set to "true" for read-only mode (optional)
+ *
+ * Example:
+ *   DATALINK_PROD_URL=postgresql://user:pass@host:5432/db
+ *   DATALINK_PROD_READONLY=true
  */
-export async function loadConfig(cliConfigPath?: string): Promise<Config> {
-  let rawConfig: RawConfig | null = null;
+export function loadConfig(): Config {
+  const databases = getDatabasesFromEnv();
 
-  // 1. CLI argument
-  if (cliConfigPath) {
-    const resolvedPath = resolve(cliConfigPath);
-    rawConfig = await tryReadConfigFile(resolvedPath);
-    if (!rawConfig) {
-      throw new DbMcpError(
-        ErrorCode.CONFIG_NOT_FOUND,
-        `Config file not found: ${resolvedPath}`
-      );
-    }
-  }
-
-  // 2. Environment variable
-  if (!rawConfig && process.env.DB_MCP_CONFIG) {
-    const envPath = resolve(process.env.DB_MCP_CONFIG);
-    rawConfig = await tryReadConfigFile(envPath);
-    if (!rawConfig) {
-      throw new DbMcpError(
-        ErrorCode.CONFIG_NOT_FOUND,
-        `Config file not found: ${envPath}`
-      );
-    }
-  }
-
-  // 3. Current directory
-  if (!rawConfig) {
-    rawConfig = await tryReadConfigFile(resolve('./databases.json'));
-  }
-
-  // 4. Home directory
-  if (!rawConfig) {
-    const homePath = join(homedir(), '.config', 'db-mcp', 'databases.json');
-    rawConfig = await tryReadConfigFile(homePath);
-  }
-
-  // 5. ENV-only mode
-  const envDatabases = getDatabasesFromEnv();
-
-  // Build final config
-  const databases: Record<string, DatabaseConfig> = {};
-
-  // Add databases from config file (with env placeholder resolution)
-  if (rawConfig?.databases) {
-    for (const [name, dbConfig] of Object.entries(rawConfig.databases)) {
-      databases[name] = {
-        url: resolveEnvPlaceholders(dbConfig.url),
-        readonly: dbConfig.readonly ?? false,
-        maxRows: dbConfig.maxRows,
-      };
-    }
-  }
-
-  // Add databases from environment (ENV-only mode)
-  // These don't override config file databases
-  for (const [name, dbConfig] of Object.entries(envDatabases)) {
-    if (!(name in databases)) {
-      databases[name] = dbConfig;
-    }
-  }
-
-  // Validate at least one database is configured
   if (Object.keys(databases).length === 0) {
     throw new DbMcpError(
       ErrorCode.CONFIG_NOT_FOUND,
-      'No databases configured. Provide a config file or set DB_MCP_{NAME}_URL environment variables.'
+      'No databases configured. Set DATALINK_{NAME}_URL environment variables.'
     );
   }
 
-  // Merge defaults
-  const defaults: DefaultsConfig = {
-    ...DEFAULT_CONFIG,
-    ...rawConfig?.defaults,
-  };
-
-  return { databases, defaults };
+  return { databases, defaults: DEFAULT_CONFIG };
 }
