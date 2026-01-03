@@ -145,9 +145,22 @@ describe('ListTools handler', () => {
     expect(queryTool?.inputSchema).toEqual({
       type: 'object',
       properties: {
-        database: { type: 'string', description: 'Database connection name' },
-        sql: { type: 'string', description: 'SQL SELECT query. Use $1, $2, ... for parameter placeholders' },
-        params: { type: 'array', description: 'Parameter values in order ($1, $2, ...). Always use params instead of interpolating values into SQL.' },
+        database: {
+          type: 'string',
+          description: 'Database connection name as returned by list_databases',
+        },
+        sql: {
+          type: 'string',
+          description:
+            'SELECT query using parameterized placeholders ($1, $2, ...) for values. ' +
+            'Example: SELECT * FROM users WHERE status = $1 AND created_at > $2',
+        },
+        params: {
+          type: 'array',
+          description:
+            'Parameter values corresponding to placeholders in order. ' +
+            'Example: ["active", "2024-01-01"] for $1 and $2',
+        },
       },
       required: ['database', 'sql'],
     });

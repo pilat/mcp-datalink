@@ -20,6 +20,21 @@ import { explain, type ExplainParams } from './tools/explain.js';
 import { DbMcpError } from './utils/errors.js';
 
 /**
+ * Server instructions for LLM agents.
+ * Provides workflow guidance for proper tool usage sequence.
+ */
+const SERVER_INSTRUCTIONS = `Database Query Workflow:
+1. Discovery: Use list_databases to find available database connections.
+2. Exploration: Use list_tables to discover tables in a database schema.
+3. Schema Validation: Always call describe_table before writing queries to verify exact column names, types, and constraints. Never assume or guess column names.
+4. Query Execution: Use query for SELECT statements, execute for INSERT/UPDATE/DELETE.
+5. Security: All queries must use parameterized placeholders ($1, $2, ...). Never interpolate values directly into SQL strings.
+6. Performance: Use explain to analyze query execution plans for optimization.
+
+The recommended sequence is: list_databases → list_tables → describe_table → query/execute.
+Skipping describe_table often leads to errors due to incorrect column names or types.`;
+
+/**
  * Creates an MCP server configured with all db-mcp tools.
  *
  * @param config - Application configuration with database connections and defaults
@@ -35,6 +50,7 @@ export function createServer(config: Config): Server {
       capabilities: {
         tools: {},
       },
+      instructions: SERVER_INSTRUCTIONS,
     }
   );
 
@@ -43,7 +59,8 @@ export function createServer(config: Config): Server {
     tools: [
       {
         name: 'list_databases',
-        description: 'List all configured database connections',
+        description:
+          'List all configured database connections available in this server.',
         inputSchema: {
           type: 'object' as const,
           properties: {},
@@ -52,64 +69,121 @@ export function createServer(config: Config): Server {
       },
       {
         name: 'list_tables',
-        description: 'List tables in a database schema',
+        description:
+          'List all tables and views in a database schema with row counts and metadata.',
         inputSchema: {
           type: 'object' as const,
           properties: {
-            database: { type: 'string', description: 'Database connection name' },
-            schema: { type: 'string', description: 'Schema name (default: public)' },
+            database: {
+              type: 'string',
+              description: 'Database connection name as returned by list_databases',
+            },
+            schema: {
+              type: 'string',
+              description: 'Schema name to list tables from (default: public for PostgreSQL, none for SQLite)',
+            },
           },
           required: ['database'],
         },
       },
       {
         name: 'describe_table',
-        description: 'Get table structure including columns, indexes, and foreign keys',
+        description:
+          'Retrieve detailed table structure: column names, data types, nullability, defaults, indexes, and foreign key relationships.',
         inputSchema: {
           type: 'object' as const,
           properties: {
-            database: { type: 'string', description: 'Database connection name' },
-            table: { type: 'string', description: 'Table name' },
-            schema: { type: 'string', description: 'Schema name (default: public)' },
+            database: {
+              type: 'string',
+              description: 'Database connection name as returned by list_databases',
+            },
+            table: {
+              type: 'string',
+              description: 'Table name as returned by list_tables',
+            },
+            schema: {
+              type: 'string',
+              description: 'Schema name (default: public for PostgreSQL)',
+            },
           },
           required: ['database', 'table'],
         },
       },
       {
         name: 'query',
-        description: 'Execute a read-only SELECT query. Use $1, $2, ... placeholders for parameters.',
+        description:
+          'Execute a read-only SELECT query and return results as structured data.',
         inputSchema: {
           type: 'object' as const,
           properties: {
-            database: { type: 'string', description: 'Database connection name' },
-            sql: { type: 'string', description: 'SQL SELECT query. Use $1, $2, ... for parameter placeholders' },
-            params: { type: 'array', description: 'Parameter values in order ($1, $2, ...). Always use params instead of interpolating values into SQL.' },
+            database: {
+              type: 'string',
+              description: 'Database connection name as returned by list_databases',
+            },
+            sql: {
+              type: 'string',
+              description:
+                'SELECT query using parameterized placeholders ($1, $2, ...) for values. ' +
+                'Example: SELECT * FROM users WHERE status = $1 AND created_at > $2',
+            },
+            params: {
+              type: 'array',
+              description:
+                'Parameter values corresponding to placeholders in order. ' +
+                'Example: ["active", "2024-01-01"] for $1 and $2',
+            },
           },
           required: ['database', 'sql'],
         },
       },
       {
         name: 'execute',
-        description: 'Execute INSERT/UPDATE/DELETE query. Use $1, $2, ... placeholders for parameters.',
+        description:
+          'Execute INSERT, UPDATE, or DELETE query and return affected row count.',
         inputSchema: {
           type: 'object' as const,
           properties: {
-            database: { type: 'string', description: 'Database connection name' },
-            sql: { type: 'string', description: 'SQL INSERT/UPDATE/DELETE query. Use $1, $2, ... for parameter placeholders' },
-            params: { type: 'array', description: 'Parameter values in order ($1, $2, ...). Always use params instead of interpolating values into SQL.' },
+            database: {
+              type: 'string',
+              description: 'Database connection name as returned by list_databases',
+            },
+            sql: {
+              type: 'string',
+              description:
+                'INSERT/UPDATE/DELETE query using parameterized placeholders ($1, $2, ...). ' +
+                'Example: UPDATE users SET status = $1 WHERE id = $2',
+            },
+            params: {
+              type: 'array',
+              description:
+                'Parameter values corresponding to placeholders in order. ' +
+                'Example: ["inactive", 123] for $1 and $2',
+            },
           },
           required: ['database', 'sql'],
         },
       },
       {
         name: 'explain',
-        description: 'Show query execution plan',
+        description:
+          'Analyze query execution plan to understand performance characteristics and identify optimization opportunities.',
         inputSchema: {
           type: 'object' as const,
           properties: {
-            database: { type: 'string', description: 'Database connection name' },
-            sql: { type: 'string', description: 'SQL query to explain' },
-            analyze: { type: 'boolean', description: 'Run EXPLAIN ANALYZE (default: false)' },
+            database: {
+              type: 'string',
+              description: 'Database connection name as returned by list_databases',
+            },
+            sql: {
+              type: 'string',
+              description: 'SQL query to analyze (typically a SELECT statement)',
+            },
+            analyze: {
+              type: 'boolean',
+              description:
+                'If true, actually execute the query to get real timing statistics (EXPLAIN ANALYZE). ' +
+                'If false, show estimated plan only. Default: false',
+            },
           },
           required: ['database', 'sql'],
         },
