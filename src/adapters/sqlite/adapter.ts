@@ -753,3 +753,6 @@ class SqliteConnection implements AdapterConnection {
     return `"${escaped}"`;
   }
 }
+
+// Export helper functions for testing
+export { stripComments, splitStatements };

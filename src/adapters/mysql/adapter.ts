@@ -130,8 +130,35 @@ function stripComments(sql: string): string {
     }
 
     // Handle multi-line comment: /* */
+    // Special handling for MySQL executable comments: /*! */ and /*!VERSION */
+    // These are executed by MySQL, so we must EXTRACT their content for validation
     if (char === '/' && nextChar === '*') {
       i += 2;
+
+      // Check if this is a MySQL executable comment
+      const isExecutable = i < len && sql[i] === '!';
+      if (isExecutable) {
+        i++; // Skip '!'
+        // Skip optional version number (e.g., /*!50000 ... */)
+        while (i < len && /\d/.test(sql[i])) {
+          i++;
+        }
+        // Extract content until closing */
+        let content = '';
+        while (i < len - 1) {
+          if (sql[i] === '*' && sql[i + 1] === '/') {
+            i += 2;
+            break;
+          }
+          content += sql[i];
+          i++;
+        }
+        // Include the extracted content in the result (MySQL will execute it)
+        result += content;
+        continue;
+      }
+
+      // Regular comment - skip content entirely
       while (i < len - 1) {
         if (sql[i] === '*' && sql[i + 1] === '/') {
           i += 2;
@@ -462,7 +489,7 @@ export class MySqlAdapter implements DatabaseAdapter {
       // Gracefully handle older versions that don't support it
       try {
         await connection.execute(`SET max_execution_time = ${this.timeout}`);
-      } catch (error) {
+      } catch {
         // Silently ignore if max_execution_time is not supported (older MySQL)
         // The query will still run, just without execution timeout
         // Log for debugging purposes would go here in production
@@ -648,7 +675,7 @@ class MySqlConnection implements AdapterConnection {
     // Build indexes array
     const allIndexes: IndexInfo[] = indexesRows.map((row) => ({
       name: row.name as string,
-      columns: (row.columns as string).split(','),
+      columns: row.columns ? String(row.columns).split(',').filter(Boolean) : [],
       unique: Boolean(row.unique),
       primary: Boolean(row.primary),
     }));

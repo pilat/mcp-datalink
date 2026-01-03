@@ -92,7 +92,9 @@ describe('truncateCell', () => {
     const longString = 'a'.repeat(100);
     const result = truncateCell(longString, 10);
 
-    expect(result.value).toBe('aaaaaaaaaa...');
+    // maxLength includes ellipsis: 7 chars + '...' = 10
+    expect(result.value).toBe('aaaaaaa...');
+    expect(result.value.length).toBe(10);
     expect(result.truncated).toBe(true);
   });
 
@@ -150,7 +152,8 @@ describe('truncateCell', () => {
     const result = truncateCell(obj, 20);
 
     expect(result.truncated).toBe(true);
-    expect(result.value.length).toBe(23); // 20 + '...'
+    // maxLength includes ellipsis: 17 chars + '...' = 20
+    expect(result.value.length).toBe(20);
   });
 
   it('handles exactly at limit', () => {
@@ -227,8 +230,8 @@ describe('checkTotalSize', () => {
 
   it('correctly calculates UTF-8 byte length', () => {
     // UTF-8 characters can be multiple bytes
-    const unicodeData = '\u{1F600}'.repeat(10); // emoji, 4 bytes each
-    const byteLength = Buffer.byteLength(unicodeData, 'utf8'); // 40 bytes
+    // emoji is 4 bytes each, so 10 emojis = 40 bytes
+    const unicodeData = '\u{1F600}'.repeat(10);
 
     const resultUnder = checkTotalSize(unicodeData, 50);
     expect(resultUnder.truncated).toBe(false);

@@ -29,11 +29,11 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Type check
-        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
 
       - name: Unit tests
-        run: npm run test:unit
+        run: npm test
 
       - name: Integration tests
         run: npm run test:integration

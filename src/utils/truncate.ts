@@ -70,8 +70,22 @@ export function truncateCell(
     };
   }
 
+  // Account for ellipsis length (3 chars) when truncating
+  const ellipsis = '...';
+
+  // Edge case: if maxLength is too small for ellipsis, just truncate without it
+  if (maxLength < ellipsis.length) {
+    return {
+      value: stringValue.slice(0, maxLength),
+      truncated: true,
+      originalLength: stringValue.length,
+    };
+  }
+
+  const truncateAt = maxLength - ellipsis.length;
+
   return {
-    value: stringValue.slice(0, maxLength) + '...',
+    value: stringValue.slice(0, truncateAt) + ellipsis,
     truncated: true,
     originalLength: stringValue.length,
   };

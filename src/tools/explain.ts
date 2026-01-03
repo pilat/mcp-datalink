@@ -82,9 +82,12 @@ export async function explain(
 
       await conn.execute('COMMIT');
       return queryResult;
-    } catch (error) {
+    } catch (error: unknown) {
       await conn.execute('ROLLBACK');
-      throw error;
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(String(error));
     }
   });
 
@@ -94,6 +97,10 @@ export async function explain(
   // - MySQL: Multiple columns (id, select_type, table, type, key, rows, Extra, etc.)
   // - SQLite: 4 columns (id, parent, notused, detail)
   const planLines = result.rows.map((row) => {
+    // Guard against empty rows
+    if (row.length === 0) {
+      return '';
+    }
     if (adapter.type === 'sqlite' && row.length >= 4) {
       // SQLite: extract the 'detail' column (4th column, index 3)
       return String(row[3]);
@@ -104,7 +111,7 @@ export async function explain(
       return row.map((col) => (col === null ? 'NULL' : String(col))).join('\t');
     }
     // PostgreSQL: first column is the plan line
-    return row[0] as string;
+    return String(row[0] ?? '');
   });
 
   const executionTime = Date.now() - startTime;

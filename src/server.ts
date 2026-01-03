@@ -267,14 +267,17 @@ export function createServer(config: Config): Server {
         default:
           throw new Error(`Unknown tool: ${name}`);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       if (error instanceof DbMcpError) {
         return {
           content: [{ type: 'text', text: JSON.stringify(error.toJSON(), null, 2) }],
           isError: true,
         };
       }
-      throw error;
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(String(error));
     }
   });
 

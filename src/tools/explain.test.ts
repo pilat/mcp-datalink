@@ -356,6 +356,245 @@ describe('explain', () => {
     });
   });
 
+  describe('error handling', () => {
+    describe('database not found', () => {
+      it('should throw DATABASE_NOT_FOUND when database does not exist in config', async () => {
+        const params: ExplainParams = {
+          database: 'nonexistent_db',
+          sql: 'SELECT * FROM users',
+        };
+
+        await expect(explain(params, mockConfig)).rejects.toThrow(DbMcpError);
+        await expect(explain(params, mockConfig)).rejects.toMatchObject({
+          code: ErrorCode.DATABASE_NOT_FOUND,
+          message: 'Database "nonexistent_db" not found in configuration',
+          details: {
+            database: 'nonexistent_db',
+            available: ['testdb'],
+          },
+        });
+
+        // Should not have called createAdapter
+        expect(mockCreateAdapter).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('invalid SQL syntax', () => {
+      it('should propagate parse errors for malformed SQL', async () => {
+        const params: ExplainParams = {
+          database: 'testdb',
+          sql: 'SELECT * FORM users', // Typo: FORM instead of FROM
+        };
+
+        const mockAdapter = createMockAdapter(
+          { fields: [], rows: [], rowCount: 0 },
+          {
+            parseQuery: vi.fn().mockImplementation(() => {
+              throw new DbMcpError(
+                ErrorCode.INVALID_SQL,
+                'SQL parse error: unexpected token "FORM"',
+                { sql: params.sql }
+              );
+            }),
+          }
+        );
+        mockCreateAdapter.mockReturnValue(mockAdapter);
+
+        await expect(explain(params, mockConfig)).rejects.toThrow(DbMcpError);
+        await expect(explain(params, mockConfig)).rejects.toMatchObject({
+          code: ErrorCode.INVALID_SQL,
+        });
+      });
+
+      it('should propagate database errors for table not found in EXPLAIN', async () => {
+        const params: ExplainParams = {
+          database: 'testdb',
+          sql: 'SELECT * FROM nonexistent_table',
+        };
+
+        const mockAdapter: DatabaseAdapter = {
+          type: 'postgresql' as const,
+          withConnection: vi.fn().mockImplementation(async (fn) => {
+            const mockConn = {
+              query: vi.fn().mockImplementation(async () => {
+                throw new Error('relation "nonexistent_table" does not exist');
+              }),
+              execute: vi.fn(),
+              listTables: vi.fn(),
+              describeTable: vi.fn(),
+            };
+            return fn(mockConn);
+          }),
+          getDefaultSchema: vi.fn().mockReturnValue('public'),
+          dispose: vi.fn(),
+          parseQuery: vi.fn().mockReturnValue({
+            type: 'select',
+            hasLimit: false,
+            isDangerous: false,
+            sql: params.sql,
+          }),
+          injectLimit: vi.fn(),
+          validateQueryForTool: vi.fn(),
+          getExplainPrefix: vi.fn().mockReturnValue('EXPLAIN '),
+          convertPlaceholders: vi.fn((sql) => sql),
+        };
+        mockCreateAdapter.mockReturnValue(mockAdapter);
+
+        await expect(explain(params, mockConfig)).rejects.toThrow('relation "nonexistent_table" does not exist');
+      });
+    });
+
+    describe('connection errors', () => {
+      it('should propagate connection timeout errors', async () => {
+        const params: ExplainParams = {
+          database: 'testdb',
+          sql: 'SELECT * FROM users',
+        };
+
+        const mockAdapter: DatabaseAdapter = {
+          type: 'postgresql' as const,
+          withConnection: vi.fn().mockImplementation(async () => {
+            throw new DbMcpError(
+              ErrorCode.QUERY_TIMEOUT,
+              'Query exceeded timeout of 30000ms',
+              { timeout: 30000 }
+            );
+          }),
+          getDefaultSchema: vi.fn().mockReturnValue('public'),
+          dispose: vi.fn(),
+          parseQuery: vi.fn().mockReturnValue({
+            type: 'select',
+            hasLimit: false,
+            isDangerous: false,
+            sql: params.sql,
+          }),
+          injectLimit: vi.fn(),
+          validateQueryForTool: vi.fn(),
+          getExplainPrefix: vi.fn().mockReturnValue('EXPLAIN '),
+          convertPlaceholders: vi.fn((sql) => sql),
+        };
+        mockCreateAdapter.mockReturnValue(mockAdapter);
+
+        await expect(explain(params, mockConfig)).rejects.toThrow(DbMcpError);
+        await expect(explain(params, mockConfig)).rejects.toMatchObject({
+          code: ErrorCode.QUERY_TIMEOUT,
+        });
+      });
+
+      it('should propagate connection refused errors', async () => {
+        const params: ExplainParams = {
+          database: 'testdb',
+          sql: 'SELECT * FROM users',
+        };
+
+        const mockAdapter: DatabaseAdapter = {
+          type: 'postgresql' as const,
+          withConnection: vi.fn().mockImplementation(async () => {
+            throw new DbMcpError(
+              ErrorCode.CONNECTION_FAILED,
+              'Connection refused: ECONNREFUSED 127.0.0.1:5432',
+              { host: '127.0.0.1', port: 5432 }
+            );
+          }),
+          getDefaultSchema: vi.fn().mockReturnValue('public'),
+          dispose: vi.fn(),
+          parseQuery: vi.fn().mockReturnValue({
+            type: 'select',
+            hasLimit: false,
+            isDangerous: false,
+            sql: params.sql,
+          }),
+          injectLimit: vi.fn(),
+          validateQueryForTool: vi.fn(),
+          getExplainPrefix: vi.fn().mockReturnValue('EXPLAIN '),
+          convertPlaceholders: vi.fn((sql) => sql),
+        };
+        mockCreateAdapter.mockReturnValue(mockAdapter);
+
+        await expect(explain(params, mockConfig)).rejects.toThrow(DbMcpError);
+        await expect(explain(params, mockConfig)).rejects.toMatchObject({
+          code: ErrorCode.CONNECTION_FAILED,
+        });
+      });
+    });
+
+    describe('transaction rollback on error', () => {
+      it('should rollback transaction on PostgreSQL when query fails', async () => {
+        const params: ExplainParams = {
+          database: 'testdb',
+          sql: 'SELECT * FROM users',
+        };
+
+        const executeCalls: string[] = [];
+
+        const mockAdapter: DatabaseAdapter = {
+          type: 'postgresql' as const,
+          withConnection: vi.fn().mockImplementation(async (fn) => {
+            const mockConn = {
+              query: vi.fn().mockImplementation(async () => {
+                throw new Error('Query failed');
+              }),
+              execute: vi.fn().mockImplementation(async (sql: string) => {
+                executeCalls.push(sql);
+              }),
+              listTables: vi.fn(),
+              describeTable: vi.fn(),
+            };
+            return fn(mockConn);
+          }),
+          getDefaultSchema: vi.fn().mockReturnValue('public'),
+          dispose: vi.fn(),
+          parseQuery: vi.fn().mockReturnValue({
+            type: 'select',
+            hasLimit: false,
+            isDangerous: false,
+            sql: params.sql,
+          }),
+          injectLimit: vi.fn(),
+          validateQueryForTool: vi.fn(),
+          getExplainPrefix: vi.fn().mockReturnValue('EXPLAIN '),
+          convertPlaceholders: vi.fn((sql) => sql),
+        };
+        mockCreateAdapter.mockReturnValue(mockAdapter);
+
+        await expect(explain(params, mockConfig)).rejects.toThrow('Query failed');
+
+        // Should have called BEGIN and ROLLBACK (not COMMIT)
+        expect(executeCalls).toContain('BEGIN TRANSACTION READ ONLY');
+        expect(executeCalls).toContain('ROLLBACK');
+        expect(executeCalls).not.toContain('COMMIT');
+      });
+    });
+
+    describe('multi-statement queries', () => {
+      it('should block multi-statement queries via isDangerous flag', async () => {
+        const params: ExplainParams = {
+          database: 'testdb',
+          sql: 'SELECT * FROM users; DROP TABLE users;',
+        };
+
+        const mockAdapter = createMockAdapter(
+          { fields: [], rows: [], rowCount: 0 },
+          {
+            parseQuery: vi.fn().mockReturnValue({
+              type: 'select',
+              hasLimit: false,
+              isDangerous: true,
+              dangerousReason: 'Multi-statement queries are not allowed',
+              sql: params.sql,
+            }),
+          }
+        );
+        mockCreateAdapter.mockReturnValue(mockAdapter);
+
+        await expect(explain(params, mockConfig)).rejects.toThrow(DbMcpError);
+        await expect(explain(params, mockConfig)).rejects.toMatchObject({
+          code: ErrorCode.QUERY_BLOCKED,
+        });
+      });
+    });
+  });
+
   describe('non-dangerous queries', () => {
     it('should allow SELECT queries', async () => {
       const params: ExplainParams = {
