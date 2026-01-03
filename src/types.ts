@@ -38,12 +38,6 @@ export interface Config {
   defaults: DefaultsConfig;
 }
 
-/** Raw config shape before defaults are applied */
-export interface RawConfig {
-  databases?: Record<string, Partial<DatabaseConfig> & { url: string }>;
-  defaults?: Partial<DefaultsConfig>;
-}
-
 export interface QueryResult {
   columns: string[];
   rows: unknown[][];
