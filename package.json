@@ -30,6 +30,8 @@
     "url": "https://github.com/pilat/mcp-datalink"
   },
   "license": "MIT",
+  "homepage": "https://github.com/pilat/mcp-datalink",
+  "mcpName": "io.github.pilat/mcp-datalink",
   "files": [
     "dist"
   ],
