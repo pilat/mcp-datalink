@@ -55,6 +55,46 @@ sqlite:///Users/me/data/app.sqlite
 sqlite://../relative/path/data.db
 ```
 
+### Environment Variable Substitution
+
+URLs support `${VAR}` syntax to reference other environment variables:
+
+```json
+{
+  "mcpServers": {
+    "datalink": {
+      "command": "npx",
+      "args": ["-y", "@pilat/mcp-datalink"],
+      "env": {
+        "DATALINK_MAIN_URL": "${DATABASE_URL}"
+      }
+    }
+  }
+}
+```
+
+This allows reusing existing environment variables (like `DATABASE_URL` from your shell or `.env` file).
+
+**Supported syntax:**
+
+| Syntax | Description |
+|--------|-------------|
+| `${VAR}` | Expands to value of `VAR`, or keeps `${VAR}` if unset |
+| `${VAR:-default}` | Expands to value of `VAR`, or `default` if unset |
+
+**Examples:**
+
+```bash
+# Reference existing DATABASE_URL
+DATALINK_MAIN_URL="${DATABASE_URL}"
+
+# Build URL from parts
+DATALINK_MAIN_URL="postgresql://${DB_USER}:${DB_PASS}@${DB_HOST}:5432/mydb"
+
+# With default values
+DATALINK_MAIN_URL="postgresql://localhost:${DB_PORT:-5432}/mydb"
+```
+
 ### Config File Locations
 
 | Client | Config file |

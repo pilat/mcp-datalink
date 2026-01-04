@@ -2,6 +2,27 @@ import type { Config, DatabaseConfig, DefaultsConfig } from '../types.js';
 
 import { DbMcpError, ErrorCode } from '../utils/errors.js';
 
+/**
+ * Expand environment variable references in a string.
+ * Supports ${VAR_NAME} and ${VAR_NAME:-default} syntax.
+ */
+export function expandEnvVariables(value: string): string {
+  // Pattern matches ${VAR_NAME} or ${VAR_NAME:-default_value}
+  const pattern = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
+
+  return value.replace(pattern, (match, varName: string, defaultValue?: string) => {
+    const envValue = process.env[varName];
+    if (envValue !== undefined) {
+      return envValue;
+    }
+    if (defaultValue !== undefined) {
+      return defaultValue;
+    }
+    // Return original match if variable not found and no default
+    return match;
+  });
+}
+
 const DEFAULT_CONFIG: DefaultsConfig = {
   maxRows: 100,
   maxCellLength: 500,
@@ -28,7 +49,7 @@ function getDatabasesFromEnv(): Record<string, DatabaseConfig> {
       const readonlyValue = process.env[readonlyKey];
 
       databases[name] = {
-        url: value,
+        url: expandEnvVariables(value),
         readonly: readonlyValue === 'true' || readonlyValue === '1',
       };
     }

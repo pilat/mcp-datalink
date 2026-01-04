@@ -3,7 +3,7 @@
   "name": "io.github.pilat/mcp-datalink",
   "title": "DataLink",
   "description": "MCP server for secure database access (PostgreSQL, MySQL, SQLite)",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "repository": {
     "url": "https://github.com/pilat/mcp-datalink",
     "source": "github"
@@ -17,14 +17,14 @@
     {
       "registryType": "npm",
       "identifier": "@pilat/mcp-datalink",
-      "version": "1.2.4",
+      "version": "1.2.5",
       "transport": {
         "type": "stdio"
       },
       "environmentVariables": [
         {
           "name": "DATALINK_ANALYTICS_URL",
-          "description": "Database connection URL. Pattern: DATALINK_<NAME>_URL where <NAME> identifies the database. Supports postgresql://, mysql://, or file path for SQLite.",
+          "description": "Database connection URL. Pattern: DATALINK_<NAME>_URL where <NAME> identifies the database. Supports postgresql://, mysql://, or file path for SQLite. Supports ${VAR} and ${VAR:-default} substitution.",
           "isRequired": true,
           "isSecret": true
         },
