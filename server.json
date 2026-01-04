@@ -3,7 +3,7 @@
   "name": "io.github.pilat/mcp-datalink",
   "title": "DataLink",
   "description": "MCP server for secure database access (PostgreSQL, MySQL, SQLite)",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "repository": {
     "url": "https://github.com/pilat/mcp-datalink",
     "source": "github"
