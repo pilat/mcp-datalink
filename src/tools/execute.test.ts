@@ -291,6 +291,59 @@ describe('execute', () => {
     });
   });
 
+  describe('parameter validation', () => {
+    it('should throw INVALID_SQL when fewer params than placeholders', async () => {
+      const params: ExecuteParams = {
+        database: 'testdb',
+        sql: 'UPDATE users SET name = $1 WHERE id = $2',
+        params: ['Alice'], // Only 1 param, but 2 placeholders
+      };
+
+      const mockAdapter = createMockAdapter({ fields: [], rows: [], rowCount: 0 });
+      mockCreateAdapter.mockReturnValue(mockAdapter);
+
+      await expect(execute(params, mockConfig)).rejects.toThrow(DbMcpError);
+      await expect(execute(params, mockConfig)).rejects.toMatchObject({
+        code: ErrorCode.INVALID_SQL,
+        message: 'Query has 2 placeholders but 1 parameter provided',
+      });
+    });
+
+    it('should throw INVALID_SQL when more params than placeholders', async () => {
+      const params: ExecuteParams = {
+        database: 'testdb',
+        sql: 'INSERT INTO users (name) VALUES ($1)',
+        params: ['Alice', 'extra', 'params'], // 3 params, but 1 placeholder
+      };
+
+      const mockAdapter = createMockAdapter({ fields: [], rows: [], rowCount: 0 });
+      mockCreateAdapter.mockReturnValue(mockAdapter);
+
+      await expect(execute(params, mockConfig)).rejects.toThrow(DbMcpError);
+      await expect(execute(params, mockConfig)).rejects.toMatchObject({
+        code: ErrorCode.INVALID_SQL,
+        message: 'Query has 1 placeholder but 3 parameters provided',
+      });
+    });
+
+    it('should throw INVALID_SQL when params provided but no placeholders', async () => {
+      const params: ExecuteParams = {
+        database: 'testdb',
+        sql: "DELETE FROM users WHERE status = 'inactive'",
+        params: ['unexpected'],
+      };
+
+      const mockAdapter = createMockAdapter({ fields: [], rows: [], rowCount: 0 });
+      mockCreateAdapter.mockReturnValue(mockAdapter);
+
+      await expect(execute(params, mockConfig)).rejects.toThrow(DbMcpError);
+      await expect(execute(params, mockConfig)).rejects.toMatchObject({
+        code: ErrorCode.INVALID_SQL,
+        message: 'Query has 0 placeholders but 1 parameter provided',
+      });
+    });
+  });
+
   describe('prepared statements', () => {
     it('should pass params to prepared statement', async () => {
       const params: ExecuteParams = {

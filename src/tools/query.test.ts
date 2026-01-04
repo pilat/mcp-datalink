@@ -136,6 +136,59 @@ describe('query', () => {
     });
   });
 
+  describe('parameter validation', () => {
+    it('should throw INVALID_SQL when fewer params than placeholders', async () => {
+      const params: QueryParams = {
+        database: 'testdb',
+        sql: 'SELECT * FROM users WHERE id = $1 AND name = $2',
+        params: ['123'], // Only 1 param, but 2 placeholders
+      };
+
+      const mockAdapter = createMockAdapter({ fields: [], rows: [], rowCount: 0 });
+      mockCreateAdapter.mockReturnValue(mockAdapter);
+
+      await expect(query(params, mockConfig)).rejects.toThrow(DbMcpError);
+      await expect(query(params, mockConfig)).rejects.toMatchObject({
+        code: ErrorCode.INVALID_SQL,
+        message: 'Query has 2 placeholders but 1 parameter provided',
+      });
+    });
+
+    it('should throw INVALID_SQL when more params than placeholders', async () => {
+      const params: QueryParams = {
+        database: 'testdb',
+        sql: 'SELECT * FROM users WHERE id = $1',
+        params: ['123', 'extra'], // 2 params, but 1 placeholder
+      };
+
+      const mockAdapter = createMockAdapter({ fields: [], rows: [], rowCount: 0 });
+      mockCreateAdapter.mockReturnValue(mockAdapter);
+
+      await expect(query(params, mockConfig)).rejects.toThrow(DbMcpError);
+      await expect(query(params, mockConfig)).rejects.toMatchObject({
+        code: ErrorCode.INVALID_SQL,
+        message: 'Query has 1 placeholder but 2 parameters provided',
+      });
+    });
+
+    it('should throw INVALID_SQL when params provided but no placeholders', async () => {
+      const params: QueryParams = {
+        database: 'testdb',
+        sql: 'SELECT * FROM users',
+        params: ['unexpected'],
+      };
+
+      const mockAdapter = createMockAdapter({ fields: [], rows: [], rowCount: 0 });
+      mockCreateAdapter.mockReturnValue(mockAdapter);
+
+      await expect(query(params, mockConfig)).rejects.toThrow(DbMcpError);
+      await expect(query(params, mockConfig)).rejects.toMatchObject({
+        code: ErrorCode.INVALID_SQL,
+        message: 'Query has 0 placeholders but 1 parameter provided',
+      });
+    });
+  });
+
   describe('prepared statements', () => {
     it('should pass params to prepared statement', async () => {
       const params: QueryParams = {

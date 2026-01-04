@@ -6,300 +6,30 @@
  */
 
 import Database from 'better-sqlite3';
-import * as path from 'path';
-import * as fs from 'fs';
+
 import type {
-  DatabaseAdapter,
-  AdapterConnection,
-  RawQueryResult,
   AdapterConfig,
+  AdapterConnection,
+  DatabaseAdapter,
   ListTablesInternalResult,
+  RawQueryResult,
 } from '../types.js';
 import type {
+  ColumnInfo,
+  ForeignKeyInfo,
+  IndexInfo,
   ParsedQuery,
-  QueryType,
   TableDescription,
   TableInfo,
-  ColumnInfo,
-  IndexInfo,
-  ForeignKeyInfo,
 } from '../../types.js';
-import { DbMcpError, ErrorCode } from '../../utils/errors.js';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SQL Dialect helpers (formerly in dialect.ts)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Dangerous SQL operations that are always blocked
- */
-const DANGEROUS_OPERATIONS = [
-  'DROP',
-  'TRUNCATE',
-  'ALTER',
-  'CREATE',
-  'GRANT',
-  'REVOKE',
-  'ATTACH',
-  'DETACH',
-  'VACUUM',
-  'REINDEX',
-] as const;
-
-/**
- * Strip SQL comments from a query
- */
-function stripComments(sql: string): string {
-  let result = '';
-  let i = 0;
-  let inString = false;
-  let stringChar = '';
-
-  while (i < sql.length) {
-    if (!inString && (sql[i] === "'" || sql[i] === '"')) {
-      inString = true;
-      stringChar = sql[i];
-      result += sql[i];
-      i++;
-      continue;
-    }
-
-    if (inString) {
-      if (sql[i] === stringChar) {
-        if (i + 1 < sql.length && sql[i + 1] === stringChar) {
-          result += sql[i] + sql[i + 1];
-          i += 2;
-          continue;
-        } else {
-          inString = false;
-          result += sql[i];
-          i++;
-          continue;
-        }
-      }
-      result += sql[i];
-      i++;
-      continue;
-    }
-
-    if (sql[i] === '-' && i + 1 < sql.length && sql[i + 1] === '-') {
-      while (i < sql.length && sql[i] !== '\n') {
-        i++;
-      }
-      if (i < sql.length) {
-        result += ' ';
-        i++;
-      }
-      continue;
-    }
-
-    if (sql[i] === '/' && i + 1 < sql.length && sql[i + 1] === '*') {
-      i += 2;
-      while (i < sql.length - 1 && !(sql[i] === '*' && sql[i + 1] === '/')) {
-        i++;
-      }
-      if (i < sql.length - 1) {
-        i += 2;
-      }
-      result += ' ';
-      continue;
-    }
-
-    result += sql[i];
-    i++;
-  }
-
-  return result;
-}
-
-/**
- * Split SQL by semicolons, respecting string literals
- */
-function splitStatements(sql: string): string[] {
-  const statements: string[] = [];
-  let current = '';
-  let inString = false;
-  let stringChar = '';
-
-  for (let i = 0; i < sql.length; i++) {
-    const char = sql[i];
-
-    if (!inString && (char === "'" || char === '"')) {
-      inString = true;
-      stringChar = char;
-      current += char;
-      continue;
-    }
-
-    if (inString && char === stringChar) {
-      if (i + 1 < sql.length && sql[i + 1] === stringChar) {
-        current += char + sql[i + 1];
-        i++;
-        continue;
-      } else {
-        inString = false;
-        current += char;
-        continue;
-      }
-    }
-
-    if (char === ';' && !inString) {
-      if (current.trim()) {
-        statements.push(current.trim());
-      }
-      current = '';
-      continue;
-    }
-
-    current += char;
-  }
-
-  if (current.trim()) {
-    statements.push(current.trim());
-  }
-
-  return statements;
-}
-
-/**
- * Detect query type from normalized SQL
- */
-function detectQueryType(normalizedSql: string): QueryType {
-  if (normalizedSql.startsWith('SELECT') || normalizedSql.startsWith('WITH')) {
-    return 'select';
-  }
-  if (normalizedSql.startsWith('INSERT')) {
-    return 'insert';
-  }
-  if (normalizedSql.startsWith('UPDATE')) {
-    return 'update';
-  }
-  if (normalizedSql.startsWith('DELETE')) {
-    return 'delete';
-  }
-  return 'other';
-}
-
-/**
- * Check if SQL contains a dangerous operation
- */
-function checkDangerous(normalizedSql: string): {
-  isDangerous: boolean;
-  reason?: string;
-} {
-  for (const operation of DANGEROUS_OPERATIONS) {
-    if (
-      normalizedSql.startsWith(operation) ||
-      normalizedSql.startsWith(operation + ' ') ||
-      normalizedSql.includes(' ' + operation + ' ')
-    ) {
-      return {
-        isDangerous: true,
-        reason: `${operation} statements are not allowed`,
-      };
-    }
-  }
-
-  if (normalizedSql.startsWith('PRAGMA')) {
-    if (normalizedSql.includes('=')) {
-      return {
-        isDangerous: true,
-        reason: 'PRAGMA modifications are not allowed',
-      };
-    }
-  }
-
-  return { isDangerous: false };
-}
-
-/**
- * Check if a SELECT query has a LIMIT clause
- */
-function hasLimitClause(sql: string): boolean {
-  return /\bLIMIT\s+\d+/i.test(sql);
-}
-
-/**
- * Parse SQLite URL to extract file path
- *
- * Supported formats:
- * - sqlite:///absolute/path.db
- * - sqlite://./relative/path.db
- * - sqlite://:memory:
- * - /absolute/path.db (plain file path)
- * - ./relative/path.db (plain file path)
- *
- * @param url - SQLite connection URL or file path
- * @returns Resolved absolute file path or :memory:
- */
-function parseSqliteUrl(url: string): string {
-  if (url.startsWith('sqlite://')) {
-    const pathPart = url.slice('sqlite://'.length);
-
-    // Special case: :memory:
-    if (pathPart === ':memory:') {
-      return ':memory:';
-    }
-
-    // Handle both absolute (/path) and relative (./path) paths
-    return pathPart;
-  }
-
-  // Plain file path (no sqlite:// prefix)
-  return url;
-}
-
-/**
- * Validate and resolve SQLite database path
- *
- * SECURITY: Prevents path traversal attacks by:
- * 1. Resolving to absolute path
- * 2. Ensuring path doesn't contain suspicious patterns
- * 3. Checking file exists (unless :memory:)
- *
- * @param rawPath - Raw path from config
- * @param basePath - Base directory for relative paths (process.cwd())
- * @returns Validated absolute path
- * @throws DbMcpError if path is invalid or file not found
- */
-function validateAndResolvePath(rawPath: string, basePath: string): string {
-  // :memory: is always valid
-  if (rawPath === ':memory:') {
-    return ':memory:';
-  }
-
-  // Resolve to absolute path
-  const absolutePath = path.isAbsolute(rawPath) ? rawPath : path.resolve(basePath, rawPath);
-
-  // Normalize to remove any .. or . components
-  const normalizedPath = path.normalize(absolutePath);
-
-  // SECURITY: Check for path traversal attempts
-  // After normalization, path should not go above the base directory for relative paths
-  if (!path.isAbsolute(rawPath)) {
-    // For relative paths, ensure the resolved path is still within reasonable bounds
-    // This prevents sqlite://../../etc/passwd type attacks
-    const relativeToCwd = path.relative(basePath, normalizedPath);
-    if (relativeToCwd.startsWith('..')) {
-      throw new DbMcpError(
-        ErrorCode.CONFIG_INVALID,
-        'Path traversal detected. SQLite path must not escape the working directory.',
-        { path: rawPath, resolved: normalizedPath }
-      );
-    }
-  }
-
-  // Check file exists
-  if (!fs.existsSync(normalizedPath)) {
-    throw new DbMcpError(
-      ErrorCode.CONNECTION_FAILED,
-      `SQLite database file not found: ${normalizedPath}`,
-      { path: rawPath, resolved: normalizedPath }
-    );
-  }
-
-  return normalizedPath;
-}
+import {
+  injectLimit as sharedInjectLimit,
+  parseQuery as sharedParseQuery,
+  validateQueryForTool as sharedValidateQueryForTool,
+} from '../../utils/sql-parser.js';
+import { checkSqlitePragmaModification } from './pragma-check.js';
+import { parseSqliteUrl, validateAndResolvePath } from './url-parser.js';
 
 /**
  * SQLite database adapter
@@ -323,9 +53,6 @@ export class SqliteAdapter implements DatabaseAdapter {
     this.readonly = config.database.readonly;
   }
 
-  /**
-   * Get the default schema name for SQLite
-   */
   getDefaultSchema(): string {
     return 'main';
   }
@@ -334,135 +61,88 @@ export class SqliteAdapter implements DatabaseAdapter {
   // SQL Dialect methods
   // ─────────────────────────────────────────────────────────────────────────────
 
-  /**
-   * Parse and validate a SQLite SQL query
-   */
   parseQuery(sql: string): ParsedQuery {
-    const withoutComments = stripComments(sql);
-    const statements = splitStatements(withoutComments);
-
-    if (statements.length === 0) {
-      throw new DbMcpError(ErrorCode.INVALID_SQL, 'No valid SQL statement found', { sql });
+    // First check for SQLite-specific PRAGMA modification (before parsing)
+    const pragmaCheck = checkSqlitePragmaModification(sql);
+    if (pragmaCheck.isDangerous) {
+      return {
+        type: 'other',
+        hasLimit: false,
+        isDangerous: true,
+        dangerousReason: pragmaCheck.reason,
+        sql,
+      };
     }
 
-    if (statements.length > 1) {
-      throw new DbMcpError(
-        ErrorCode.MULTI_STATEMENT,
-        'Multiple SQL statements are not allowed. Please provide a single statement.',
-        { sql, statementCount: statements.length }
-      );
-    }
-
-    const statement = statements[0];
-    const normalizedSql = statement.trim().toUpperCase();
-
-    const { isDangerous, reason } = checkDangerous(normalizedSql);
-    const queryType = detectQueryType(normalizedSql);
-    const hasLimit = queryType === 'select' && hasLimitClause(statement);
-
-    return {
-      type: queryType,
-      hasLimit,
-      isDangerous,
-      dangerousReason: reason,
-      sql: statement,
-    };
+    // Use shared parser for standard validation
+    return sharedParseQuery(sql, 'SQLite');
   }
 
-  /**
-   * Inject a LIMIT clause into a SELECT query if it doesn't have one
-   */
   injectLimit(sql: string, limit: number): string {
-    if (hasLimitClause(sql)) {
-      return sql;
-    }
-    const trimmed = sql.replace(/;\s*$/, '').trim();
-    return `${trimmed} LIMIT ${limit}`;
+    return sharedInjectLimit(sql, limit, 'SQLite');
   }
 
-  /**
-   * Validate that a SQL query is appropriate for a specific tool
-   */
   validateQueryForTool(sql: string, tool: 'query' | 'execute'): void {
     const parsed = this.parseQuery(sql);
-
-    if (tool === 'query') {
-      if (parsed.type !== 'select') {
-        throw new DbMcpError(
-          ErrorCode.QUERY_BLOCKED,
-          'The query tool only accepts SELECT statements. Use the execute tool for ' +
-            parsed.type.toUpperCase() +
-            ' statements.',
-          { sql, queryType: parsed.type, tool }
-        );
-      }
-    } else if (tool === 'execute') {
-      if (parsed.type === 'select') {
-        throw new DbMcpError(
-          ErrorCode.QUERY_BLOCKED,
-          'The execute tool does not accept SELECT statements. Use the query tool instead.',
-          { sql, queryType: parsed.type, tool }
-        );
-      }
-
-      if (parsed.isDangerous) {
-        throw new DbMcpError(
-          ErrorCode.QUERY_BLOCKED,
-          parsed.dangerousReason ?? 'This operation is not allowed',
-          { sql, queryType: parsed.type, tool }
-        );
-      }
-
-      const allowedTypes: QueryType[] = ['insert', 'update', 'delete'];
-      if (!allowedTypes.includes(parsed.type)) {
-        throw new DbMcpError(
-          ErrorCode.QUERY_BLOCKED,
-          'The execute tool only accepts INSERT, UPDATE, or DELETE statements.',
-          { sql, queryType: parsed.type, tool }
-        );
-      }
-    }
+    sharedValidateQueryForTool(parsed, tool);
   }
 
-  /**
-   * Get the EXPLAIN prefix for SQLite
-   */
+  /** SQLite always uses EXPLAIN QUERY PLAN (no ANALYZE support) */
   getExplainPrefix(_analyze: boolean): string {
+    // _analyze is ignored: SQLite doesn't support EXPLAIN ANALYZE;
+    // EXPLAIN QUERY PLAN is the only supported form
     return 'EXPLAIN QUERY PLAN ';
   }
 
-  /**
-   * Convert $1, $2 style placeholders to ? style for SQLite
-   */
+  /** Convert $1, $2 placeholders to ? for SQLite */
   convertPlaceholders(sql: string): string {
     let result = '';
-    let inString = false;
-    let stringChar = '';
+    let inQuoted = false;
+    let quoteChar = '';
+    let closeChar = ''; // For bracket quoting, close char differs from open
     let i = 0;
 
     while (i < sql.length) {
-      if (!inString && (sql[i] === "'" || sql[i] === '"')) {
-        inString = true;
-        stringChar = sql[i];
-        result += sql[i];
-        i++;
-        continue;
-      }
-
-      if (inString && sql[i] === stringChar) {
-        if (i + 1 < sql.length && sql[i + 1] === stringChar) {
-          result += sql[i] + sql[i + 1];
-          i += 2;
+      // Enter quoted section (string literals or identifiers)
+      if (!inQuoted) {
+        if (sql[i] === "'" || sql[i] === '"' || sql[i] === '`') {
+          // Single quote, double quote, or backtick - same char closes
+          inQuoted = true;
+          quoteChar = sql[i];
+          closeChar = sql[i];
+          result += sql[i];
+          i++;
           continue;
-        } else {
-          inString = false;
+        }
+        if (sql[i] === '[') {
+          // Bracket quoting - ] closes
+          inQuoted = true;
+          quoteChar = '[';
+          closeChar = ']';
           result += sql[i];
           i++;
           continue;
         }
       }
 
-      if (!inString && sql[i] === '$') {
+      // Handle closing of quoted section
+      if (inQuoted && sql[i] === closeChar) {
+        // For ', ", ` - handle escaped quotes (doubled)
+        if (quoteChar !== '[' && i + 1 < sql.length && sql[i + 1] === closeChar) {
+          result += sql[i] + sql[i + 1];
+          i += 2;
+          continue;
+        } else {
+          // End of quoted section
+          inQuoted = false;
+          result += sql[i];
+          i++;
+          continue;
+        }
+      }
+
+      // Convert $N placeholders to ? (only outside quoted sections)
+      if (!inQuoted && sql[i] === '$') {
         let j = i + 1;
         while (j < sql.length && /\d/.test(sql[j])) {
           j++;
@@ -481,11 +161,7 @@ export class SqliteAdapter implements DatabaseAdapter {
     return result;
   }
 
-  /**
-   * Execute a function with a managed SQLite connection
-   */
   async withConnection<T>(fn: (conn: AdapterConnection) => Promise<T>): Promise<T> {
-    // Open database (create new handle per request)
     const db = new Database(this.dbPath, {
       readonly: this.readonly,
       // busy_timeout handles lock contention (different from query timeout)
@@ -493,7 +169,6 @@ export class SqliteAdapter implements DatabaseAdapter {
     });
 
     try {
-      // Create connection wrapper and execute user function
       const connection = new SqliteConnection(db);
       return await fn(connection);
     } finally {
@@ -501,12 +176,8 @@ export class SqliteAdapter implements DatabaseAdapter {
     }
   }
 
-  /**
-   * Clean up resources (no persistent resources in this adapter)
-   */
   async dispose(): Promise<void> {
-    // No persistent resources to clean up
-    // Each database handle is opened and closed per request
+    // No persistent connections to clean up
   }
 }
 
@@ -521,15 +192,6 @@ export class SqliteAdapter implements DatabaseAdapter {
 class SqliteConnection implements AdapterConnection {
   constructor(private readonly db: Database.Database) {}
 
-  /**
-   * Execute a parameterized query
-   *
-   * SECURITY: All user SQL MUST go through this method with parameters.
-   * Uses better-sqlite3 prepared statements.
-   *
-   * Note: better-sqlite3 uses ? placeholders (not $1, $2 like PostgreSQL).
-   * The SqliteDialect.convertPlaceholders() should be called before this if needed.
-   */
   async query(sql: string, params?: unknown[]): Promise<RawQueryResult> {
     const stmt = this.db.prepare(sql);
 
@@ -562,23 +224,16 @@ class SqliteConnection implements AdapterConnection {
     }
   }
 
-  /**
-   * Execute a raw SQL statement
-   *
-   * SECURITY WARNING: Only use for validated internal commands
-   * For SQLite this is primarily used for PRAGMA and transaction commands
-   */
   async execute(sql: string): Promise<void> {
     this.db.exec(sql);
   }
 
   /**
-   * List tables in SQLite database
-   *
-   * SQLite doesn't have schemas - we ignore the schema parameter and
-   * always report "main" as the schema.
+   * SQLite doesn't have schemas, we always return "main"
+   * Fetches maxTables + 1 to detect truncation.
    */
-  async listTables(_schema: string, _maxTables: number): Promise<ListTablesInternalResult> {
+  async listTables(_schema: string, maxTables: number): Promise<ListTablesInternalResult> {
+    // _schema is ignored: SQLite doesn't support schemas; all tables exist in the "main" schema
     // Query sqlite_master for tables and views
     // Filter out internal sqlite_ tables
     const sql = `
@@ -589,15 +244,17 @@ class SqliteConnection implements AdapterConnection {
       WHERE type IN ('table', 'view')
         AND name NOT LIKE 'sqlite_%'
       ORDER BY name
+      LIMIT ?
     `;
 
     const stmt = this.db.prepare(sql);
-    const rows = stmt.all() as Array<{
+    const rows = stmt.all(maxTables + 1) as Array<{
       name: string;
       type: 'table' | 'view';
     }>;
 
-    const tables: TableInfo[] = rows.map((row) => ({
+    const truncated = rows.length > maxTables;
+    const tables: TableInfo[] = rows.slice(0, maxTables).map((row) => ({
       name: row.name,
       schema: 'main',
       type: row.type,
@@ -606,23 +263,17 @@ class SqliteConnection implements AdapterConnection {
 
     return {
       tables,
-      totalAvailable: tables.length,
+      truncated,
+      totalAvailable: truncated ? rows.length : tables.length,
     };
   }
 
-  /**
-   * Describe a SQLite table
-   *
-   * Uses PRAGMA commands to get table structure.
-   * Schema parameter is ignored since SQLite doesn't have schemas.
-   */
   async describeTable(
     table: string,
     _schema: string,
     limits: { maxColumns: number; maxIndexes: number }
   ): Promise<TableDescription> {
-    // Validate table name to prevent injection in PRAGMA commands
-    // Table names in SQLite can contain almost anything, but we use quotes
+    // _schema is ignored: SQLite doesn't support schemas; table names must be unique within the database
     const safeTable = this.escapeIdentifier(table);
 
     // Query 1: Get columns using PRAGMA table_info
@@ -665,7 +316,6 @@ class SqliteConnection implements AdapterConnection {
     const fkStmt = this.db.prepare(`PRAGMA foreign_key_list(${safeTable})`);
     const fkRows = fkStmt.all() as ForeignKeyRow[];
 
-    // Build columns array
     const allColumns: ColumnInfo[] = columnRows.map((row) => ({
       name: row.name,
       type: row.type || 'TEXT', // SQLite allows typeless columns
@@ -674,7 +324,6 @@ class SqliteConnection implements AdapterConnection {
       primaryKey: row.pk > 0,
     }));
 
-    // Build indexes array (need to get columns for each index)
     interface IndexInfoRow {
       seqno: number;
       cid: number;
@@ -700,7 +349,6 @@ class SqliteConnection implements AdapterConnection {
       };
     });
 
-    // Build foreign keys array
     const foreignKeys: ForeignKeyInfo[] = fkRows.map((fk) => ({
       column: fk.from,
       references: {
@@ -709,7 +357,6 @@ class SqliteConnection implements AdapterConnection {
       },
     }));
 
-    // Apply limits and track truncation
     let truncated = false;
     const truncationReasons: string[] = [];
 
@@ -738,21 +385,8 @@ class SqliteConnection implements AdapterConnection {
     };
   }
 
-  /**
-   * Escape a SQLite identifier (table/column name)
-   *
-   * SQLite uses double quotes for identifiers.
-   * Double any existing double quotes to escape them.
-   *
-   * @param name - Identifier to escape
-   * @returns Safely quoted identifier
-   */
   private escapeIdentifier(name: string): string {
-    // Replace any double quotes with two double quotes (escape)
-    const escaped = name.replace(/"/g, '""');
-    return `"${escaped}"`;
+    return `"${name.replace(/"/g, '""')}"`;
   }
 }
 
-// Export helper functions for testing
-export { stripComments, splitStatements };

@@ -210,24 +210,27 @@ describe('SQL Security Edge Cases', () => {
     });
 
     describe('PostgreSQL adapter', () => {
-      it('should block data-modifying CTE with DELETE for query tool', () => {
-        // PostgreSQL supports data-modifying CTEs (WITH ... DELETE ... RETURNING)
+      it('throws on data-modifying CTE with DELETE (parser limitation)', () => {
+        // node-sql-parser doesn't support DELETE with RETURNING inside CTE
         const sql = 'WITH deleted AS (DELETE FROM users RETURNING *) SELECT * FROM deleted';
         expect(() => postgresAdapter.validateQueryForTool(sql, 'query')).toThrow();
       });
 
       it('should block data-modifying CTE with UPDATE for query tool', () => {
         const sql = 'WITH updated AS (UPDATE users SET name = $1 RETURNING *) SELECT * FROM updated';
+        // Data-modifying CTEs are blocked even when outer query is SELECT
         expect(() => postgresAdapter.validateQueryForTool(sql, 'query')).toThrow();
       });
 
       it('should block data-modifying CTE with INSERT for query tool', () => {
         const sql = 'WITH inserted AS (INSERT INTO users (name) VALUES ($1) RETURNING *) SELECT * FROM inserted';
+        // Data-modifying CTEs are blocked even when outer query is SELECT
         expect(() => postgresAdapter.validateQueryForTool(sql, 'query')).toThrow();
       });
 
-      it('should block WITH clause followed by DELETE for query tool', () => {
+      it('should throw on WITH clause followed by DELETE (unparseable)', () => {
         const sql = 'WITH x AS (SELECT 1) DELETE FROM users';
+        // node-sql-parser doesn't support WITH...DELETE in PostgreSQL mode
         expect(() => postgresAdapter.validateQueryForTool(sql, 'query')).toThrow();
       });
 
@@ -240,6 +243,7 @@ describe('SQL Security Edge Cases', () => {
           )
           DELETE FROM users WHERE id IN (SELECT n FROM cte)
         `;
+        // node-sql-parser doesn't support WITH...DELETE
         expect(() => postgresAdapter.validateQueryForTool(sql, 'query')).toThrow();
       });
     });
@@ -370,10 +374,10 @@ describe('SQL Security Edge Cases', () => {
         expect(result.type).toBe('select');
       });
 
-      it('should handle unclosed string with comment marker', () => {
-        // This is invalid SQL but should not crash
+      it('should throw on unclosed string with comment marker', () => {
+        // This is invalid SQL - node-sql-parser throws on invalid SQL
         const sql = "SELECT 'unclosed -- ";
-        expect(() => mysqlAdapter.parseQuery(sql)).not.toThrow();
+        expect(() => mysqlAdapter.parseQuery(sql)).toThrow();
       });
     });
 
@@ -440,11 +444,11 @@ describe('SQL Security Edge Cases', () => {
         expect(result.type).toBe('select');
       });
 
-      // NOTE: pgsql-ast-parser does not support dollar-quoted strings
-      // This documents a known limitation
-      it('throws on dollar-quoted strings (parser limitation)', () => {
+      // node-sql-parser supports dollar-quoted strings in PostgreSQL mode
+      it('parses dollar-quoted strings correctly', () => {
         const sql = "SELECT $tag$-- not a comment$tag$ FROM users";
-        expect(() => postgresAdapter.parseQuery(sql)).toThrow();
+        const result = postgresAdapter.parseQuery(sql);
+        expect(result.type).toBe('select');
       });
     });
   });

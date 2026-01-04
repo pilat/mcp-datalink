@@ -41,7 +41,7 @@ describe('query integration (MySQL)', () => {
       const result = await query(
         {
           database: 'mysqldb',
-          sql: 'SELECT * FROM users WHERE id = ?',
+          sql: 'SELECT * FROM users WHERE id = $1',
           params: ['11111111-1111-1111-1111-111111111111'],
         },
         config
@@ -58,7 +58,7 @@ describe('query integration (MySQL)', () => {
       const result = await query(
         {
           database: 'mysqldb',
-          sql: 'SELECT * FROM users WHERE age > ? AND balance < ?',
+          sql: 'SELECT * FROM users WHERE age > $1 AND balance < $2',
           params: [26, 600],
         },
         config

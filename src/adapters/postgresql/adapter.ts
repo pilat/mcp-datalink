@@ -6,96 +6,29 @@
  */
 
 import pg from 'pg';
-import { parse, Statement, toSql, SelectFromStatement } from 'pgsql-ast-parser';
+
 import type {
-  DatabaseAdapter,
-  AdapterConnection,
-  RawQueryResult,
   AdapterConfig,
+  AdapterConnection,
+  DatabaseAdapter,
   ListTablesInternalResult,
+  RawQueryResult,
 } from '../types.js';
 import type {
+  ColumnInfo,
+  ForeignKeyInfo,
+  IndexInfo,
   ParsedQuery,
-  QueryType,
   TableDescription,
   TableInfo,
-  ColumnInfo,
-  IndexInfo,
-  ForeignKeyInfo,
 } from '../../types.js';
+
 import { DbMcpError, ErrorCode } from '../../utils/errors.js';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SQL Dialect helpers (formerly in dialect.ts)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Prefixes that indicate dangerous SQL operations
- * pgsql-ast-parser returns types like "drop table", "alter table", etc.
- */
-const DANGEROUS_PREFIXES: ReadonlyArray<string> = [
-  'drop',
-  'truncate',
-  'alter',
-  'create',
-  'grant',
-  'revoke',
-];
-
-/**
- * Maps pgsql-ast-parser statement types to our QueryType
- */
-function getQueryType(statement: Statement): QueryType {
-  switch (statement.type) {
-    case 'select':
-      return 'select';
-    case 'insert':
-      return 'insert';
-    case 'update':
-      return 'update';
-    case 'delete':
-      return 'delete';
-    default:
-      return 'other';
-  }
-}
-
-/**
- * Check if a statement type is dangerous
- * Handles compound types from pgsql-ast-parser like "drop table", "alter table"
- */
-function checkDangerous(statement: Statement): { isDangerous: boolean; reason?: string } {
-  const stmtType = statement.type.toLowerCase();
-
-  for (const prefix of DANGEROUS_PREFIXES) {
-    if (stmtType === prefix || stmtType.startsWith(prefix + ' ')) {
-      const operation = prefix.toUpperCase();
-      return {
-        isDangerous: true,
-        reason: operation + ' statements are not allowed',
-      };
-    }
-  }
-
-  return { isDangerous: false };
-}
-
-/**
- * Type guard to check if a statement is a SelectFromStatement
- */
-function isSelectFromStatement(statement: Statement): statement is SelectFromStatement {
-  return statement.type === 'select' && 'columns' in statement;
-}
-
-/**
- * Check if a SELECT statement has a LIMIT clause
- */
-function hasLimitClause(statement: Statement): boolean {
-  if (!isSelectFromStatement(statement)) {
-    return false;
-  }
-  return statement.limit !== undefined && statement.limit !== null;
-}
+import {
+  injectLimit as sharedInjectLimit,
+  parseQuery as sharedParseQuery,
+  validateQueryForTool as sharedValidateQueryForTool,
+} from '../../utils/sql-parser.js';
 
 /**
  * PostgreSQL database adapter
@@ -113,9 +46,6 @@ export class PostgreSqlAdapter implements DatabaseAdapter {
     this.timeout = config.defaults.timeout;
   }
 
-  /**
-   * Get the default schema name for PostgreSQL
-   */
   getDefaultSchema(): string {
     return 'public';
   }
@@ -124,148 +54,24 @@ export class PostgreSqlAdapter implements DatabaseAdapter {
   // SQL Dialect methods
   // ─────────────────────────────────────────────────────────────────────────────
 
-  /**
-   * Parse and validate a SQL query
-   */
   parseQuery(sql: string): ParsedQuery {
-    let statements: Statement[];
-
-    try {
-      statements = parse(sql);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown parse error';
-      throw new DbMcpError(
-        ErrorCode.INVALID_SQL,
-        'Failed to parse SQL: ' + message,
-        { sql }
-      );
-    }
-
-    // Filter out empty statements (trailing semicolons create these)
-    const nonEmptyStatements = statements.filter(
-      (stmt) => (stmt.type as unknown) !== 'empty' && stmt.type !== undefined
-    );
-
-    if (nonEmptyStatements.length === 0) {
-      throw new DbMcpError(
-        ErrorCode.INVALID_SQL,
-        'No valid SQL statement found',
-        { sql }
-      );
-    }
-
-    if (nonEmptyStatements.length > 1) {
-      throw new DbMcpError(
-        ErrorCode.MULTI_STATEMENT,
-        'Multiple SQL statements are not allowed. Please provide a single statement.',
-        { sql, statementCount: nonEmptyStatements.length }
-      );
-    }
-
-    const statement = nonEmptyStatements[0];
-    const queryType = getQueryType(statement);
-    const { isDangerous, reason } = checkDangerous(statement);
-
-    return {
-      type: queryType,
-      hasLimit: hasLimitClause(statement),
-      isDangerous,
-      dangerousReason: reason,
-      sql,
-    };
+    return sharedParseQuery(sql, 'PostgreSQL');
   }
 
-  /**
-   * Inject a LIMIT clause into a SELECT query if it doesn't have one
-   */
   injectLimit(sql: string, limit: number): string {
-    let statements: Statement[];
-
-    try {
-      statements = parse(sql);
-    } catch {
-      return sql;
-    }
-
-    const nonEmptyStatements = statements.filter(
-      (stmt) => (stmt.type as unknown) !== 'empty' && stmt.type !== undefined
-    );
-
-    if (nonEmptyStatements.length !== 1) {
-      return sql;
-    }
-
-    const statement = nonEmptyStatements[0];
-
-    if (!isSelectFromStatement(statement)) {
-      return sql;
-    }
-
-    if (statement.limit !== undefined && statement.limit !== null) {
-      return sql;
-    }
-
-    statement.limit = {
-      limit: { type: 'integer', value: limit },
-    };
-
-    return toSql.statement(statement);
+    return sharedInjectLimit(sql, limit, 'PostgreSQL');
   }
 
-  /**
-   * Validate that a SQL query is appropriate for a specific tool
-   */
   validateQueryForTool(sql: string, tool: 'query' | 'execute'): void {
     const parsed = this.parseQuery(sql);
-
-    if (tool === 'query') {
-      if (parsed.type !== 'select') {
-        throw new DbMcpError(
-          ErrorCode.QUERY_BLOCKED,
-          'The query tool only accepts SELECT statements. Use the execute tool for ' +
-            parsed.type.toUpperCase() +
-            ' statements.',
-          { sql, queryType: parsed.type, tool }
-        );
-      }
-    } else if (tool === 'execute') {
-      if (parsed.type === 'select') {
-        throw new DbMcpError(
-          ErrorCode.QUERY_BLOCKED,
-          'The execute tool does not accept SELECT statements. Use the query tool instead.',
-          { sql, queryType: parsed.type, tool }
-        );
-      }
-
-      if (parsed.isDangerous) {
-        throw new DbMcpError(
-          ErrorCode.QUERY_BLOCKED,
-          parsed.dangerousReason ?? 'This operation is not allowed',
-          { sql, queryType: parsed.type, tool }
-        );
-      }
-
-      const allowedTypes: QueryType[] = ['insert', 'update', 'delete'];
-      if (!allowedTypes.includes(parsed.type)) {
-        throw new DbMcpError(
-          ErrorCode.QUERY_BLOCKED,
-          'The execute tool only accepts INSERT, UPDATE, or DELETE statements.',
-          { sql, queryType: parsed.type, tool }
-        );
-      }
-    }
+    sharedValidateQueryForTool(parsed, tool);
   }
 
-  /**
-   * Get the EXPLAIN prefix for PostgreSQL
-   */
   getExplainPrefix(analyze: boolean): string {
     return analyze ? 'EXPLAIN ANALYZE ' : 'EXPLAIN ';
   }
 
-  /**
-   * Convert placeholders - no-op for PostgreSQL (already uses $1, $2, $3)
-   */
+  /** No-op for PostgreSQL (already uses $1, $2 placeholders) */
   convertPlaceholders(sql: string): string {
     return sql;
   }
@@ -274,12 +80,19 @@ export class PostgreSqlAdapter implements DatabaseAdapter {
    * Execute a function with a managed PostgreSQL connection
    */
   async withConnection<T>(fn: (conn: AdapterConnection) => Promise<T>): Promise<T> {
+    // Validate timeout before creating connection (SET command doesn't support parameters)
+    if (!Number.isInteger(this.timeout) || this.timeout < 0) {
+      throw new DbMcpError(
+        ErrorCode.CONNECTION_FAILED,
+        `Invalid timeout value: ${this.timeout}`
+      );
+    }
+
     const client = new pg.Client({
       connectionString: this.connectionUrl,
     });
 
     try {
-      // Connect to database
       try {
         await client.connect();
       } catch (error) {
@@ -292,16 +105,8 @@ export class PostgreSqlAdapter implements DatabaseAdapter {
         );
       }
 
-      // SET command doesn't support parameterized queries, so validate timeout first
-      if (!Number.isInteger(this.timeout) || this.timeout < 0) {
-        throw new DbMcpError(
-          ErrorCode.CONNECTION_FAILED,
-          `Invalid timeout value: ${this.timeout}`
-        );
-      }
       await client.query(`SET statement_timeout = ${this.timeout}`);
 
-      // Create connection wrapper and execute user function
       const connection = new PostgreSqlConnection(client);
       return await fn(connection);
     } finally {
@@ -309,12 +114,8 @@ export class PostgreSqlAdapter implements DatabaseAdapter {
     }
   }
 
-  /**
-   * Clean up resources (no persistent resources in this adapter)
-   */
   async dispose(): Promise<void> {
-    // No persistent resources to clean up
-    // Each connection is created and destroyed per request
+    // No persistent connections to clean up
   }
 }
 
@@ -347,9 +148,6 @@ class PostgreSqlConnection implements AdapterConnection {
     };
   }
 
-  /**
-   * Execute a raw SQL statement (for BEGIN, COMMIT, ROLLBACK)
-   */
   async execute(sql: string): Promise<void> {
     await this.client.query(sql);
   }
@@ -358,10 +156,9 @@ class PostgreSqlConnection implements AdapterConnection {
    * List tables in a PostgreSQL schema
    *
    * Uses information_schema and pg_class for table metadata.
-   * Note: maxTables is accepted for interface compatibility but filtering
-   * is done at the caller level to report accurate totalAvailable count.
+   * Fetches maxTables + 1 to detect truncation.
    */
-  async listTables(schema: string, _maxTables: number): Promise<ListTablesInternalResult> {
+  async listTables(schema: string, maxTables: number): Promise<ListTablesInternalResult> {
     const sql = `
       SELECT
         t.table_name as name,
@@ -373,6 +170,7 @@ class PostgreSqlConnection implements AdapterConnection {
         AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = t.table_schema)
       WHERE t.table_schema = $1
       ORDER BY t.table_name
+      LIMIT $2
     `;
 
     interface TableRow {
@@ -382,9 +180,10 @@ class PostgreSqlConnection implements AdapterConnection {
       rows_estimate: string | null;
     }
 
-    const result = await this.client.query<TableRow>(sql, [schema]);
+    const result = await this.client.query<TableRow>(sql, [schema, maxTables + 1]);
 
-    const tables: TableInfo[] = result.rows.map((row) => ({
+    const truncated = result.rows.length > maxTables;
+    const tables: TableInfo[] = result.rows.slice(0, maxTables).map((row) => ({
       name: row.name,
       schema: row.schema,
       type: row.type,
@@ -393,7 +192,8 @@ class PostgreSqlConnection implements AdapterConnection {
 
     return {
       tables,
-      totalAvailable: tables.length,
+      truncated,
+      totalAvailable: truncated ? result.rows.length : tables.length,
     };
   }
 
@@ -485,12 +285,10 @@ class PostgreSqlConnection implements AdapterConnection {
         this.client.query<ForeignKeyRow>(foreignKeysQuery, [schema, table]),
       ]);
 
-    // Build set of primary key columns for quick lookup
     const primaryKeyColumns = new Set(
       primaryKeyResult.rows.map((row) => row.column_name)
     );
 
-    // Build columns array with primaryKey flag
     const allColumns: ColumnInfo[] = columnsResult.rows.map((row) => ({
       name: row.name,
       type: row.type,
@@ -499,7 +297,6 @@ class PostgreSqlConnection implements AdapterConnection {
       primaryKey: primaryKeyColumns.has(row.name),
     }));
 
-    // Build indexes array
     const allIndexes: IndexInfo[] = indexesResult.rows.map((row) => {
       const { columns, unique } = parseIndexDef(row.indexdef);
       // An index is primary if all its columns are in the primary key
@@ -516,7 +313,6 @@ class PostgreSqlConnection implements AdapterConnection {
       };
     });
 
-    // Build foreign keys array
     const foreignKeys: ForeignKeyInfo[] = foreignKeysResult.rows.map((row) => ({
       column: row.column,
       references: {
@@ -525,7 +321,6 @@ class PostgreSqlConnection implements AdapterConnection {
       },
     }));
 
-    // Apply limits and track truncation
     let truncated = false;
     const truncationReasons: string[] = [];
 

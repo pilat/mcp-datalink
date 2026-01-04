@@ -11,14 +11,23 @@ import { DbMcpError, ErrorCode } from './utils/errors.js';
 // Mock all tool modules
 vi.mock('./tools/list-databases.js', () => ({
   listDatabases: vi.fn(),
+  formatListDatabasesResultAsMarkdown: vi.fn((result) => {
+    return `# Databases\n\n${result.databases.map((d: { name: string; readonly: boolean }) => `- ${d.name} (${d.readonly ? 'readonly' : 'read-write'})`).join('\n')}`;
+  }),
 }));
 
 vi.mock('./tools/list-tables.js', () => ({
   listTables: vi.fn(),
+  formatListTablesResultAsMarkdown: vi.fn((result) => {
+    return `# Tables\n\n${result.tables.map((t: { name: string }) => `- ${t.name}`).join('\n') || 'No tables found'}`;
+  }),
 }));
 
 vi.mock('./tools/describe-table.js', () => ({
   describeTable: vi.fn(),
+  formatTableDescriptionAsMarkdown: vi.fn((result) => {
+    return `# Table: ${result.table}\n\nSchema: ${result.schema}`;
+  }),
 }));
 
 vi.mock('./tools/query.js', () => ({
@@ -32,10 +41,16 @@ vi.mock('./tools/query.js', () => ({
 
 vi.mock('./tools/execute.js', () => ({
   execute: vi.fn(),
+  formatExecuteResultAsMarkdown: vi.fn((result) => {
+    return `# ${result.command}\n\n**Rows affected:** ${result.rowsAffected}`;
+  }),
 }));
 
 vi.mock('./tools/explain.js', () => ({
   explain: vi.fn(),
+  formatExplainResultAsMarkdown: vi.fn((result) => {
+    return `# Execution Plan\n\n\`\`\`\n${result.plan}\n\`\`\``;
+  }),
 }));
 
 // Import mocked functions for assertions
@@ -182,9 +197,8 @@ describe('CallTool handler', () => {
 
     expect(mockListDatabases).toHaveBeenCalledWith(testConfig);
     expect(result.content[0].type).toBe('text');
-    expect(JSON.parse(result.content[0].text)).toEqual({
-      databases: [{ name: 'test_db', readonly: false }],
-    });
+    // Now returns Markdown format instead of JSON
+    expect(result.content[0].text).toContain('test_db');
   });
 
   it('routes list_tables to listTables handler', async () => {

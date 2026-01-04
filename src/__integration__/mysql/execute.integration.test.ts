@@ -37,7 +37,7 @@ describe('execute integration (MySQL)', () => {
       const result = await execute(
         {
           database: 'mysqldb',
-          sql: 'INSERT INTO products (name, price, stock, category) VALUES (?, ?, ?, ?)',
+          sql: 'INSERT INTO products (name, price, stock, category) VALUES ($1, $2, $3, $4)',
           params: ['Param Product', 99.99, 5, 'param'],
         },
         config
@@ -89,7 +89,7 @@ describe('execute integration (MySQL)', () => {
       const result = await execute(
         {
           database: 'mysqldb',
-          sql: 'UPDATE products SET price = ? WHERE id = ?',
+          sql: 'UPDATE products SET price = $1 WHERE id = $2',
           params: [99.99, 1],
         },
         config

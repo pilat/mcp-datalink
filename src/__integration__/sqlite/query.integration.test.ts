@@ -36,24 +36,7 @@ describe('query SQLite integration', () => {
       expect(result.rowCount).toBe(2);
     });
 
-    it('supports prepared statement params with ? placeholders', async () => {
-      const config = createSqliteTestConfig();
-      const result = await query(
-        {
-          database: 'sqlitedb',
-          sql: 'SELECT * FROM users WHERE id = ?',
-          params: ['11111111-1111-1111-1111-111111111111'],
-        },
-        config
-      );
-
-      expect(result.rowCount).toBe(1);
-      // Find email column index and check value
-      const emailIdx = result.columns.indexOf('email');
-      expect(result.rows[0][emailIdx]).toBe('alice@example.com');
-    });
-
-    it('supports $1 placeholder conversion to ?', async () => {
+    it('supports prepared statement params', async () => {
       const config = createSqliteTestConfig();
       const result = await query(
         {
@@ -65,6 +48,7 @@ describe('query SQLite integration', () => {
       );
 
       expect(result.rowCount).toBe(1);
+      // Find email column index and check value
       const emailIdx = result.columns.indexOf('email');
       expect(result.rows[0][emailIdx]).toBe('alice@example.com');
     });
@@ -74,7 +58,7 @@ describe('query SQLite integration', () => {
       const result = await query(
         {
           database: 'sqlitedb',
-          sql: 'SELECT * FROM users WHERE age > ? AND balance < ?',
+          sql: 'SELECT * FROM users WHERE age > $1 AND balance < $2',
           params: [26, 600],
         },
         config
@@ -140,12 +124,12 @@ describe('query SQLite integration', () => {
     it('supports aggregate functions', async () => {
       const config = createSqliteTestConfig();
       const result = await query(
-        { database: 'sqlitedb', sql: 'SELECT COUNT(*) as count, SUM(balance) as total FROM users' },
+        { database: 'sqlitedb', sql: 'SELECT COUNT(*) as cnt, SUM(balance) as total FROM users' },
         config
       );
 
       expect(result.rowCount).toBe(1);
-      expect(result.columns).toContain('count');
+      expect(result.columns).toContain('cnt');
       expect(result.columns).toContain('total');
     });
 

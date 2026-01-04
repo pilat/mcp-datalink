@@ -2,15 +2,24 @@
  * Execute tool for INSERT/UPDATE/DELETE statements
  */
 
-import type { Config, ExecuteResult } from '../types.js';
-import { createAdapter } from '../adapters/index.js';
-import { DbMcpError, ErrorCode } from '../utils/errors.js';
+import type { Config, ExecuteParams, ExecuteResult } from '../types.js';
 
-export interface ExecuteParams {
-  database: string;
-  sql: string;
-  params?: unknown[];
+import { createAdapter } from '../adapters/index.js';
+
+/**
+ * Format ExecuteResult as Markdown
+ */
+export function formatExecuteResultAsMarkdown(result: ExecuteResult): string {
+  const parts: string[] = [];
+
+  parts.push(`**Command:** ${result.command}`);
+  parts.push(`**Rows affected:** ${result.rowsAffected}`);
+  parts.push(`**Execution time:** ${result.executionTime}ms`);
+
+  return parts.join('\n');
 }
+import { DbMcpError, ErrorCode } from '../utils/errors.js';
+import { getValidatedDatabase, validateParamCount } from '../utils/validation.js';
 
 /**
  * Execute an INSERT/UPDATE/DELETE statement
@@ -28,18 +37,8 @@ export async function execute(
   config: Config
 ): Promise<ExecuteResult> {
   const startTime = Date.now();
+  const dbConfig = getValidatedDatabase(params.database, config);
 
-  // Get database config
-  const dbConfig = config.databases[params.database];
-  if (!dbConfig) {
-    throw new DbMcpError(
-      ErrorCode.DATABASE_NOT_FOUND,
-      `Database "${params.database}" not found in configuration`,
-      { database: params.database, available: Object.keys(config.databases) }
-    );
-  }
-
-  // Step 1: Check if database is readonly
   if (dbConfig.readonly) {
     throw new DbMcpError(
       ErrorCode.READONLY_VIOLATION,
@@ -48,18 +47,12 @@ export async function execute(
     );
   }
 
-  // Create adapter for this database
   const adapter = createAdapter(dbConfig, config.defaults);
-
-  // Step 2: Validate query type - blocks SELECT and dangerous DDL
   adapter.validateQueryForTool(params.sql, 'execute');
+  validateParamCount(params.sql, params.params ?? []);
 
-  // Step 3: Get the command type from parsed query
   const parsed = adapter.parseQuery(params.sql);
   const command = parsed.type.toUpperCase();
-
-  // Step 4: Convert placeholders for non-PostgreSQL dialects
-  // PostgreSQL uses $1, $2; MySQL/SQLite use ?
   const sql = adapter.convertPlaceholders(params.sql);
 
   const result = await adapter.withConnection(async (conn) => {

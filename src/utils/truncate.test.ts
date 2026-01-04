@@ -162,6 +162,38 @@ describe('truncateCell', () => {
     expect(result.value).toBe('12345');
     expect(result.truncated).toBe(false);
   });
+
+  it('handles object with nested BigInt values', () => {
+    const obj = { id: BigInt('9007199254740993'), name: 'test' };
+    const result = truncateCell(obj, 100);
+
+    expect(result.value).toBe('{"id":"9007199254740993","name":"test"}');
+    expect(result.truncated).toBe(false);
+  });
+
+  it('handles deeply nested BigInt values', () => {
+    const nested = { a: { b: { bigNum: BigInt('12345678901234567890') } } };
+    const result = truncateCell(nested, 100);
+
+    expect(result.value).toBe('{"a":{"b":{"bigNum":"12345678901234567890"}}}');
+    expect(result.truncated).toBe(false);
+  });
+
+  it('handles array with BigInt values', () => {
+    const arr = [BigInt(1), BigInt(2), BigInt('9007199254740993')];
+    const result = truncateCell(arr, 100);
+
+    expect(result.value).toBe('["1","2","9007199254740993"]');
+    expect(result.truncated).toBe(false);
+  });
+
+  it('truncates object with nested BigInt when over limit', () => {
+    const obj = { id: BigInt('9007199254740993'), name: 'test' };
+    const result = truncateCell(obj, 20);
+
+    expect(result.truncated).toBe(true);
+    expect(result.value.length).toBe(20);
+  });
 });
 
 describe('truncateColumns', () => {
@@ -202,30 +234,35 @@ describe('checkTotalSize', () => {
     const data = 'small data';
     const result = checkTotalSize(data, 1024);
 
-    expect(result.truncated).toBe(false);
-    expect(result.truncationReason).toBeUndefined();
+    expect(result.data).toBe(data);
+    expect(result.info.truncated).toBe(false);
+    expect(result.info.truncationReason).toBeUndefined();
   });
 
-  it('returns truncated when over limit', () => {
+  it('returns truncated data when over limit', () => {
     const data = 'x'.repeat(1000);
     const result = checkTotalSize(data, 100);
 
-    expect(result.truncated).toBe(true);
-    expect(result.truncationReason).toBe('maxTotalSize');
-    expect(result.hint).toBe('Use LIMIT/OFFSET or WHERE clause to paginate');
+    expect(result.info.truncated).toBe(true);
+    expect(result.info.truncationReason).toBe('maxTotalSize');
+    expect(result.info.hint).toBe('Use LIMIT/OFFSET or WHERE clause to paginate');
+    expect(Buffer.byteLength(result.data, 'utf8')).toBeLessThanOrEqual(100);
+    expect(result.data.length).toBe(100);
   });
 
   it('handles exactly at limit', () => {
     const data = 'x'.repeat(100);
     const result = checkTotalSize(data, 100);
 
-    expect(result.truncated).toBe(false);
+    expect(result.data).toBe(data);
+    expect(result.info.truncated).toBe(false);
   });
 
   it('handles empty string', () => {
     const result = checkTotalSize('', 100);
 
-    expect(result.truncated).toBe(false);
+    expect(result.data).toBe('');
+    expect(result.info.truncated).toBe(false);
   });
 
   it('correctly calculates UTF-8 byte length', () => {
@@ -234,9 +271,22 @@ describe('checkTotalSize', () => {
     const unicodeData = '\u{1F600}'.repeat(10);
 
     const resultUnder = checkTotalSize(unicodeData, 50);
-    expect(resultUnder.truncated).toBe(false);
+    expect(resultUnder.data).toBe(unicodeData);
+    expect(resultUnder.info.truncated).toBe(false);
 
     const resultOver = checkTotalSize(unicodeData, 30);
-    expect(resultOver.truncated).toBe(true);
+    expect(resultOver.info.truncated).toBe(true);
+    expect(Buffer.byteLength(resultOver.data, 'utf8')).toBeLessThanOrEqual(30);
+  });
+
+  it('truncates at character boundaries for multi-byte characters', () => {
+    // emoji is 4 bytes each
+    const unicodeData = '\u{1F600}'.repeat(10); // 40 bytes total
+    const result = checkTotalSize(unicodeData, 20);
+
+    expect(result.info.truncated).toBe(true);
+    // Should fit exactly 5 emojis (20 bytes)
+    expect(result.data).toBe('\u{1F600}'.repeat(5));
+    expect(Buffer.byteLength(result.data, 'utf8')).toBe(20);
   });
 });

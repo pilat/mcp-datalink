@@ -5,15 +5,10 @@
 export type QueryType = 'select' | 'insert' | 'update' | 'delete' | 'other';
 
 export interface ParsedQuery {
-  /** The type of SQL query */
   type: QueryType;
-  /** Whether the query has a LIMIT clause (for SELECT queries) */
   hasLimit: boolean;
-  /** Whether the query is dangerous (DROP, TRUNCATE, ALTER, etc.) */
   isDangerous: boolean;
-  /** Reason why query is considered dangerous */
   dangerousReason?: string;
-  /** The original SQL string */
   sql: string;
 }
 
@@ -94,4 +89,53 @@ export interface TableInfo {
   schema: string;
   type: 'table' | 'view';
   rows_estimate: number | null;
+}
+
+// Tool Parameters
+
+export interface ListDatabasesResult {
+  databases: Array<{
+    name: string;
+    readonly: boolean;
+  }>;
+}
+
+export interface ListTablesParams {
+  database: string;
+  schema?: string;
+}
+
+export interface ListTablesResult {
+  tables: TableInfo[];
+  truncated: boolean;
+  totalAvailable?: number;
+}
+
+export interface DescribeTableParams {
+  database: string;
+  table: string;
+  schema?: string;
+}
+
+export interface QueryParams {
+  database: string;
+  sql: string;
+  params?: unknown[];
+}
+
+export interface ExecuteParams {
+  database: string;
+  sql: string;
+  params?: unknown[];
+}
+
+export interface ExplainParams {
+  database: string;
+  sql: string;
+  analyze?: boolean;
+}
+
+export interface ExplainResult {
+  plan: string;
+  executionTime: number;
 }

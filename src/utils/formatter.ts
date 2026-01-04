@@ -3,9 +3,24 @@
  */
 
 /**
- * Format a single value for display
- * Handles null, dates, objects, and primitive values
+ * JSON replacer function that handles BigInt values by converting them to strings.
+ * This prevents "TypeError: Do not know how to serialize a BigInt" when using JSON.stringify.
  */
+export function bigIntReplacer(_key: string, value: unknown): unknown {
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+  return value;
+}
+
+/**
+ * Safely stringify a value to JSON, handling BigInt values.
+ */
+export function safeJsonStringify(value: unknown): string {
+  return JSON.stringify(value, bigIntReplacer);
+}
+
+/** Format a value for display (handles null, dates, objects, primitives) */
 export function formatValue(value: unknown): string {
   if (value === null || value === undefined) {
     return 'NULL';
@@ -24,22 +39,19 @@ export function formatValue(value: unknown): string {
   }
 
   if (typeof value === 'object') {
-    return JSON.stringify(value);
+    return safeJsonStringify(value);
   }
 
   return String(value);
 }
 
-/**
- * Escape pipe characters in cell content for Markdown tables
- */
 function escapeForMarkdown(value: string): string {
-  return value.replace(/\|/g, '\\|');
+  return value
+    .replace(/\|/g, '\\|')
+    .replace(/\r\n|\r|\n/g, ' ')
+    .replace(/`/g, '\\`');
 }
 
-/**
- * Format query results as a Markdown table
- */
 export function formatAsMarkdownTable(
   columns: string[],
   rows: (string | null)[][]

@@ -2,20 +2,38 @@
  * list_tables tool - lists tables in a database schema
  */
 
-import type { Config, TableInfo } from '../types.js';
+import type { Config, ListTablesParams, ListTablesResult } from '../types.js';
+
 import { createAdapter } from '../adapters/index.js';
-import { DbMcpError, ErrorCode } from '../utils/errors.js';
+import { formatAsMarkdownTable } from '../utils/formatter.js';
 
-export interface ListTablesParams {
-  database: string;
-  schema?: string; // default: "public"
-}
+/**
+ * Format ListTablesResult as Markdown table
+ */
+export function formatListTablesResultAsMarkdown(result: ListTablesResult): string {
+  const parts: string[] = [];
 
-export interface ListTablesResult {
-  tables: TableInfo[];
-  truncated: boolean;
-  totalAvailable?: number;
+  if (result.tables.length > 0) {
+    const headers = ['name', 'schema', 'type', 'rows_estimate'];
+    const rows = result.tables.map((table) => [
+      table.name,
+      table.schema,
+      table.type,
+      table.rows_estimate !== null ? String(table.rows_estimate) : 'NULL',
+    ]);
+    parts.push(formatAsMarkdownTable(headers, rows));
+  } else {
+    parts.push('_No tables found_');
+  }
+
+  if (result.truncated && result.totalAvailable !== undefined) {
+    parts.push('');
+    parts.push(`**Note:** Showing ${result.tables.length} of ${result.totalAvailable} tables`);
+  }
+
+  return parts.join('\n');
 }
+import { getValidatedDatabase } from '../utils/validation.js';
 
 /**
  * Lists tables and views in a database schema.
@@ -29,22 +47,8 @@ export async function listTables(
   config: Config
 ): Promise<ListTablesResult> {
   const maxTables = config.defaults.maxTables;
-
-  // Get database config
-  const dbConfig = config.databases[params.database];
-  if (!dbConfig) {
-    throw new DbMcpError(
-      ErrorCode.DATABASE_NOT_FOUND,
-      `Database "${params.database}" not found in configuration`,
-      { database: params.database, available: Object.keys(config.databases) }
-    );
-  }
-
-  // Create adapter for this database
+  const dbConfig = getValidatedDatabase(params.database, config);
   const adapter = createAdapter(dbConfig, config.defaults);
-
-  // Use provided schema or adapter's default schema
-  // PostgreSQL: "public", MySQL: database name, SQLite: "main"
   const schema = params.schema ?? adapter.getDefaultSchema();
 
   return adapter.withConnection(async (conn) => {

@@ -2,20 +2,26 @@
  * Explain tool for showing query execution plans
  */
 
-import type { Config } from '../types.js';
+import type { Config, ExplainParams, ExplainResult } from '../types.js';
+
 import { createAdapter } from '../adapters/index.js';
+
+/**
+ * Format ExplainResult as Markdown
+ */
+export function formatExplainResultAsMarkdown(result: ExplainResult): string {
+  const parts: string[] = [];
+
+  parts.push('```');
+  parts.push(result.plan);
+  parts.push('```');
+  parts.push('');
+  parts.push(`**Execution time:** ${result.executionTime}ms`);
+
+  return parts.join('\n');
+}
 import { DbMcpError, ErrorCode } from '../utils/errors.js';
-
-export interface ExplainParams {
-  database: string;
-  sql: string;
-  analyze?: boolean; // default: false
-}
-
-export interface ExplainResult {
-  plan: string;
-  executionTime: number;
-}
+import { getValidatedDatabase } from '../utils/validation.js';
 
 /**
  * Get the execution plan for a SQL query
@@ -32,21 +38,9 @@ export async function explain(
   config: Config
 ): Promise<ExplainResult> {
   const startTime = Date.now();
-
-  // Get database config
-  const dbConfig = config.databases[params.database];
-  if (!dbConfig) {
-    throw new DbMcpError(
-      ErrorCode.DATABASE_NOT_FOUND,
-      `Database "${params.database}" not found in configuration`,
-      { database: params.database, available: Object.keys(config.databases) }
-    );
-  }
-
-  // Create adapter for this database
+  const dbConfig = getValidatedDatabase(params.database, config);
   const adapter = createAdapter(dbConfig, config.defaults);
 
-  // Step 1: Parse query and check for dangerous operations
   const parsed = adapter.parseQuery(params.sql);
 
   if (parsed.isDangerous) {
@@ -58,23 +52,14 @@ export async function explain(
   }
 
   const result = await adapter.withConnection(async (conn) => {
-    // Build EXPLAIN query using adapter-specific prefix
     const explainPrefix = adapter.getExplainPrefix(params.analyze ?? false);
 
-    // SQLite and MySQL don't need READ ONLY transactions for EXPLAIN:
-    // - SQLite: Doesn't support READ ONLY transactions
-    // - MySQL: EXPLAIN doesn't execute the query, and READ ONLY tx blocks
-    //   EXPLAIN on UPDATE/DELETE even though they're safe
-    //
-    // Defense in depth is still provided by:
-    // 1. SQL parser blocking dangerous operations (DROP, TRUNCATE, etc.)
-    // 2. EXPLAIN not executing the query (MySQL) / EXPLAIN QUERY PLAN (SQLite)
-    // 3. Database adapter opening in readonly mode when configured
+    // SQLite/MySQL: EXPLAIN doesn't execute the query, no transaction needed
+    // PostgreSQL: EXPLAIN ANALYZE runs the query, wrap in READ ONLY transaction
     if (adapter.type === 'sqlite' || adapter.type === 'mysql') {
       return await conn.query(explainPrefix + params.sql);
     }
 
-    // PostgreSQL: Use READ ONLY transaction since EXPLAIN ANALYZE executes the query
     await conn.execute('BEGIN TRANSACTION READ ONLY');
 
     try {
@@ -91,19 +76,13 @@ export async function explain(
     }
   });
 
-  // Step 3: Format plan as text (join rows with newlines)
-  // Different databases have different EXPLAIN output formats:
-  // - PostgreSQL: Single column with plan text
-  // - MySQL: Multiple columns (id, select_type, table, type, key, rows, Extra, etc.)
-  // - SQLite: 4 columns (id, parent, notused, detail)
   const planLines = result.rows.map((row) => {
-    // Guard against empty rows
     if (row.length === 0) {
       return '';
     }
     if (adapter.type === 'sqlite' && row.length >= 4) {
       // SQLite: extract the 'detail' column (4th column, index 3)
-      return String(row[3]);
+      return String(row[3] ?? '');
     }
     if (adapter.type === 'mysql' && row.length > 1) {
       // MySQL: Join all columns with tabs for tabular output

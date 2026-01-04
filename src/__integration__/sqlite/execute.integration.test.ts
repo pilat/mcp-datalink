@@ -33,12 +33,12 @@ describe('execute SQLite integration', () => {
       expect((verify[0] as { price: number }).price).toBe(49.99);
     });
 
-    it('inserts with ? params', async () => {
+    it('inserts with params', async () => {
       const config = createSqliteTestConfig();
       const result = await execute(
         {
           database: 'sqlitedb',
-          sql: 'INSERT INTO products (name, price, stock, category) VALUES (?, ?, ?, ?)',
+          sql: 'INSERT INTO products (name, price, stock, category) VALUES ($1, $2, $3, $4)',
           params: ['Param Product', 99.99, 5, 'param'],
         },
         config
@@ -47,23 +47,6 @@ describe('execute SQLite integration', () => {
       expect(result.rowsAffected).toBe(1);
 
       const verify = await querySqliteSql("SELECT * FROM products WHERE name = 'Param Product'");
-      expect(verify.length).toBe(1);
-    });
-
-    it('inserts with $1 params (converted to ?)', async () => {
-      const config = createSqliteTestConfig();
-      const result = await execute(
-        {
-          database: 'sqlitedb',
-          sql: 'INSERT INTO products (name, price, stock, category) VALUES ($1, $2, $3, $4)',
-          params: ['Dollar Product', 88.88, 8, 'dollar'],
-        },
-        config
-      );
-
-      expect(result.rowsAffected).toBe(1);
-
-      const verify = await querySqliteSql("SELECT * FROM products WHERE name = 'Dollar Product'");
       expect(verify.length).toBe(1);
     });
   });
@@ -107,7 +90,7 @@ describe('execute SQLite integration', () => {
       const result = await execute(
         {
           database: 'sqlitedb',
-          sql: 'UPDATE products SET price = ? WHERE id = ?',
+          sql: 'UPDATE products SET price = $1 WHERE id = $2',
           params: [99.99, 1],
         },
         config

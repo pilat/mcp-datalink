@@ -145,13 +145,54 @@ describe('formatAsMarkdownTable', () => {
     expect(result).toContain('| 1 |  |');
   });
 
-  it('handles special characters in values', () => {
+  it('escapes newlines in values', () => {
     const columns = ['id', 'text'];
     const rows = [['1', 'line1\nline2']];
 
     const result = formatAsMarkdownTable(columns, rows);
 
-    expect(result).toContain('line1\nline2');
+    expect(result).toContain('line1 line2');
+    expect(result).not.toContain('line1\nline2');
+  });
+
+  it('escapes carriage returns and CRLF in values', () => {
+    const columns = ['id', 'text'];
+    const rows = [
+      ['1', 'line1\r\nline2'],
+      ['2', 'line3\rline4'],
+    ];
+
+    const result = formatAsMarkdownTable(columns, rows);
+
+    expect(result).toContain('line1 line2');
+    expect(result).toContain('line3 line4');
+  });
+
+  it('escapes backticks in values', () => {
+    const columns = ['id', 'code'];
+    const rows = [['1', 'use `const` here']];
+
+    const result = formatAsMarkdownTable(columns, rows);
+
+    expect(result).toContain('use \\`const\\` here');
+  });
+
+  it('escapes backticks in headers', () => {
+    const columns = ['id', '`code`'];
+    const rows = [['1', 'value']];
+
+    const result = formatAsMarkdownTable(columns, rows);
+
+    expect(result).toContain('\\`code\\`');
+  });
+
+  it('escapes multiple special characters together', () => {
+    const columns = ['id', 'data'];
+    const rows = [['1', 'line1\nhas|pipe\nand `code`']];
+
+    const result = formatAsMarkdownTable(columns, rows);
+
+    expect(result).toContain('line1 has\\|pipe and \\`code\\`');
   });
 });
 
@@ -321,6 +362,37 @@ describe('edge case data types', () => {
       const obj = { a: undefined, b: 'value' };
       // JSON.stringify excludes undefined values
       expect(formatValue(obj)).toBe('{"b":"value"}');
+    });
+
+    it('handles object with nested BigInt values', () => {
+      const obj = { id: BigInt('9007199254740993'), name: 'test' };
+      const result = formatValue(obj);
+      expect(result).toBe('{"id":"9007199254740993","name":"test"}');
+    });
+
+    it('handles deeply nested BigInt values', () => {
+      const nested = { a: { b: { bigNum: BigInt('12345678901234567890') } } };
+      const result = formatValue(nested);
+      expect(result).toBe('{"a":{"b":{"bigNum":"12345678901234567890"}}}');
+    });
+
+    it('handles array with BigInt values', () => {
+      const arr = [BigInt(1), BigInt(2), BigInt('9007199254740993')];
+      const result = formatValue(arr);
+      expect(result).toBe('["1","2","9007199254740993"]');
+    });
+
+    it('handles mixed types including BigInt in nested structure', () => {
+      const obj = {
+        regular: 42,
+        big: BigInt('9999999999999999999'),
+        nested: {
+          arr: [1, BigInt(2), 'three'],
+        },
+      };
+      const result = formatValue(obj);
+      expect(result).toContain('"big":"9999999999999999999"');
+      expect(result).toContain('"regular":42');
     });
   });
 

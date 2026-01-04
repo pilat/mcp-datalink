@@ -2,17 +2,12 @@
  * Query tool for executing SELECT statements
  */
 
-import type { Config, QueryResult } from '../types.js';
-import { createAdapter } from '../adapters/index.js';
-import { DbMcpError, ErrorCode } from '../utils/errors.js';
-import { truncateRows, truncateCell, checkTotalSize } from '../utils/truncate.js';
-import { formatAsMarkdownTable, formatValue } from '../utils/formatter.js';
+import type { Config, QueryParams, QueryResult } from '../types.js';
 
-export interface QueryParams {
-  database: string;
-  sql: string;
-  params?: unknown[];
-}
+import { createAdapter } from '../adapters/index.js';
+import { formatAsMarkdownTable, formatValue } from '../utils/formatter.js';
+import { truncateCell, truncateRows } from '../utils/truncate.js';
+import { getValidatedDatabase, validateParamCount } from '../utils/validation.js';
 
 /**
  * Format QueryResult as Markdown table followed by metadata
@@ -55,35 +50,20 @@ export async function query(
   config: Config
 ): Promise<QueryResult> {
   const startTime = Date.now();
-
-  // Get database config
-  const dbConfig = config.databases[params.database];
-  if (!dbConfig) {
-    throw new DbMcpError(
-      ErrorCode.DATABASE_NOT_FOUND,
-      `Database "${params.database}" not found in configuration`,
-      { database: params.database, available: Object.keys(config.databases) }
-    );
-  }
-
-  // Create adapter for this database
+  const dbConfig = getValidatedDatabase(params.database, config);
   const adapter = createAdapter(dbConfig, config.defaults);
 
-  // Step 1: Validate that this is a SELECT query
   adapter.validateQueryForTool(params.sql, 'query');
+  validateParamCount(params.sql, params.params ?? []);
 
-  // Step 2: Parse query and inject LIMIT if missing
   const parsed = adapter.parseQuery(params.sql);
   let sql = params.sql;
 
   if (!parsed.hasLimit) {
-    // Get maxRows from database config or defaults
     const maxRows = dbConfig?.maxRows ?? config.defaults.maxRows;
     sql = adapter.injectLimit(params.sql, maxRows);
   }
 
-  // Step 3: Convert placeholders for non-PostgreSQL dialects
-  // PostgreSQL uses $1, $2; MySQL/SQLite use ?
   sql = adapter.convertPlaceholders(sql);
 
   const result = await adapter.withConnection(async (conn) => {
@@ -93,12 +73,10 @@ export async function query(
   const columns = result.fields.map((field) => field.name);
   const rawRows = result.rows;
 
-  // Step 4: Format each cell value
   let formattedRows: string[][] = rawRows.map((row) =>
     row.map((cell) => formatValue(cell))
   );
 
-  // Step 5: Truncate individual cells if over maxCellLength
   let anyCellTruncated = false;
   formattedRows = formattedRows.map((row) =>
     row.map((cell) => {
@@ -110,24 +88,15 @@ export async function query(
     })
   );
 
-  // Step 6: Truncate rows if over maxRows
   const { rows: truncatedRows, info: rowTruncationInfo } = truncateRows(
     formattedRows,
     config.defaults.maxRows
   );
 
-  // Step 7: Check total size
-  const tableOutput = formatAsMarkdownTable(columns, truncatedRows as string[][]);
-  const sizeInfo = checkTotalSize(tableOutput, config.defaults.maxTotalSize);
+  const truncated = rowTruncationInfo.truncated || anyCellTruncated;
 
-  // Determine final truncation state
-  const truncated = rowTruncationInfo.truncated || anyCellTruncated || sizeInfo.truncated;
-
-  // Determine truncation reason (priority: maxTotalSize > maxRows > maxCellLength)
   let truncationReason: string | undefined;
-  if (sizeInfo.truncated) {
-    truncationReason = sizeInfo.truncationReason;
-  } else if (rowTruncationInfo.truncated) {
+  if (rowTruncationInfo.truncated) {
     truncationReason = rowTruncationInfo.truncationReason;
   } else if (anyCellTruncated) {
     truncationReason = 'maxCellLength';
@@ -143,7 +112,7 @@ export async function query(
     truncationReason,
     totalAvailable: rowTruncationInfo.totalAvailable,
     returned: rowTruncationInfo.returned,
-    hint: rowTruncationInfo.hint ?? sizeInfo.hint,
+    hint: rowTruncationInfo.hint,
     executionTime,
   };
 }
