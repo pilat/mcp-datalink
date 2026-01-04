@@ -9,6 +9,22 @@ import { describe, it, expect } from 'vitest';
 import { parseQuery, injectLimit } from './sql-parser.js';
 import { ErrorCode } from './errors.js';
 
+/**
+ * ESM/CommonJS compatibility smoke test
+ *
+ * node-sql-parser is a CommonJS module. Node.js 22+ has stricter
+ * ESM interop rules that can break named imports from CJS modules.
+ * This test ensures the import pattern works correctly.
+ */
+describe('ESM/CJS compatibility', () => {
+  it('should successfully import and use node-sql-parser', () => {
+    // This test verifies the module loads correctly at runtime.
+    // If the ESM/CJS import is broken, this test file won't even load.
+    const result = parseQuery('SELECT 1', 'PostgreSQL');
+    expect(result.type).toBe('select');
+  });
+});
+
 describe('parseQuery', () => {
   describe('PostgreSQL dialect', () => {
     it('should parse SELECT query', () => {

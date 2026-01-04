@@ -5,7 +5,9 @@
  * using node-sql-parser library.
  */
 
-import { AST, Parser } from 'node-sql-parser';
+import NodeSqlParser from 'node-sql-parser';
+const { Parser } = NodeSqlParser;
+type AST = NodeSqlParser.AST;
 
 import type { QueryType } from '../types.js';
 
@@ -75,7 +77,7 @@ function checkSqliteUnparseableDangerousPrefix(sql: string): { isDangerous: bool
 /**
  * Create a parser instance for the specified dialect
  */
-function createParser(): Parser {
+function createParser(): InstanceType<typeof Parser> {
   return new Parser();
 }
 
