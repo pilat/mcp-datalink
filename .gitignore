@@ -16,3 +16,5 @@ databases.json
 *.swp
 
 .DS_Store
+
+.mcpregistry_*
