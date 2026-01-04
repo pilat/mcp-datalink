@@ -1,4 +1,5 @@
 import type { Config, DatabaseConfig, DefaultsConfig } from '../types.js';
+
 import { DbMcpError, ErrorCode } from '../utils/errors.js';
 
 const DEFAULT_CONFIG: DefaultsConfig = {

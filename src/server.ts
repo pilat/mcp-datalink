@@ -6,17 +6,23 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js';
-import type { Config } from './types.js';
-import { listDatabases } from './tools/list-databases.js';
-import { listTables, type ListTablesParams } from './tools/list-tables.js';
-import { describeTable, type DescribeTableParams } from './tools/describe-table.js';
-import { query, type QueryParams, formatQueryResultAsMarkdown } from './tools/query.js';
-import { execute, type ExecuteParams } from './tools/execute.js';
-import { explain, type ExplainParams } from './tools/explain.js';
+import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+
+import type {
+  Config,
+  DescribeTableParams,
+  ExecuteParams,
+  ExplainParams,
+  ListTablesParams,
+  QueryParams,
+} from './types.js';
+
+import { describeTable, formatTableDescriptionAsMarkdown } from './tools/describe-table.js';
+import { execute, formatExecuteResultAsMarkdown } from './tools/execute.js';
+import { explain, formatExplainResultAsMarkdown } from './tools/explain.js';
+import { formatListDatabasesResultAsMarkdown, listDatabases } from './tools/list-databases.js';
+import { formatListTablesResultAsMarkdown, listTables } from './tools/list-tables.js';
+import { formatQueryResultAsMarkdown, query } from './tools/query.js';
 import { DbMcpError } from './utils/errors.js';
 
 /**
@@ -54,7 +60,6 @@ export function createServer(config: Config): Server {
     }
   );
 
-  // Register list tools handler
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
       {
@@ -191,42 +196,39 @@ export function createServer(config: Config): Server {
     ],
   }));
 
-  // Register call tool handler
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
 
     try {
       switch (name) {
-        case 'list_databases':
+        case 'list_databases': {
+          const result = listDatabases(config);
           return {
-            content: [{ type: 'text', text: JSON.stringify(listDatabases(config), null, 2) }],
+            content: [{ type: 'text', text: formatListDatabasesResultAsMarkdown(result, config) }],
           };
-        case 'list_tables':
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(
-                  await listTables(args as unknown as ListTablesParams, config),
-                  null,
-                  2
-                ),
-              },
-            ],
-          };
-        case 'describe_table':
+        }
+        case 'list_tables': {
+          const result = await listTables(args as unknown as ListTablesParams, config);
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(
-                  await describeTable(args as unknown as DescribeTableParams, config),
-                  null,
-                  2
-                ),
+                text: formatListTablesResultAsMarkdown(result),
               },
             ],
           };
+        }
+        case 'describe_table': {
+          const result = await describeTable(args as unknown as DescribeTableParams, config);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: formatTableDescriptionAsMarkdown(result),
+              },
+            ],
+          };
+        }
         case 'query': {
           const result = await query(args as unknown as QueryParams, config);
           return {
@@ -238,43 +240,42 @@ export function createServer(config: Config): Server {
             ],
           };
         }
-        case 'execute':
+        case 'execute': {
+          const result = await execute(args as unknown as ExecuteParams, config);
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(
-                  await execute(args as unknown as ExecuteParams, config),
-                  null,
-                  2
-                ),
+                text: formatExecuteResultAsMarkdown(result),
               },
             ],
           };
-        case 'explain':
+        }
+        case 'explain': {
+          const result = await explain(args as unknown as ExplainParams, config);
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(
-                  await explain(args as unknown as ExplainParams, config),
-                  null,
-                  2
-                ),
+                text: formatExplainResultAsMarkdown(result),
               },
             ],
           };
+        }
         default:
           throw new Error(`Unknown tool: ${name}`);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       if (error instanceof DbMcpError) {
         return {
           content: [{ type: 'text', text: JSON.stringify(error.toJSON(), null, 2) }],
           isError: true,
         };
       }
-      throw error;
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(String(error));
     }
   });
 

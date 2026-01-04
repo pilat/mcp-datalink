@@ -291,6 +291,59 @@ describe('execute', () => {
     });
   });
 
+  describe('parameter validation', () => {
+    it('should throw INVALID_SQL when fewer params than placeholders', async () => {
+      const params: ExecuteParams = {
+        database: 'testdb',
+        sql: 'UPDATE users SET name = $1 WHERE id = $2',
+        params: ['Alice'], // Only 1 param, but 2 placeholders
+      };
+
+      const mockAdapter = createMockAdapter({ fields: [], rows: [], rowCount: 0 });
+      mockCreateAdapter.mockReturnValue(mockAdapter);
+
+      await expect(execute(params, mockConfig)).rejects.toThrow(DbMcpError);
+      await expect(execute(params, mockConfig)).rejects.toMatchObject({
+        code: ErrorCode.INVALID_SQL,
+        message: 'Query has 2 placeholders but 1 parameter provided',
+      });
+    });
+
+    it('should throw INVALID_SQL when more params than placeholders', async () => {
+      const params: ExecuteParams = {
+        database: 'testdb',
+        sql: 'INSERT INTO users (name) VALUES ($1)',
+        params: ['Alice', 'extra', 'params'], // 3 params, but 1 placeholder
+      };
+
+      const mockAdapter = createMockAdapter({ fields: [], rows: [], rowCount: 0 });
+      mockCreateAdapter.mockReturnValue(mockAdapter);
+
+      await expect(execute(params, mockConfig)).rejects.toThrow(DbMcpError);
+      await expect(execute(params, mockConfig)).rejects.toMatchObject({
+        code: ErrorCode.INVALID_SQL,
+        message: 'Query has 1 placeholder but 3 parameters provided',
+      });
+    });
+
+    it('should throw INVALID_SQL when params provided but no placeholders', async () => {
+      const params: ExecuteParams = {
+        database: 'testdb',
+        sql: "DELETE FROM users WHERE status = 'inactive'",
+        params: ['unexpected'],
+      };
+
+      const mockAdapter = createMockAdapter({ fields: [], rows: [], rowCount: 0 });
+      mockCreateAdapter.mockReturnValue(mockAdapter);
+
+      await expect(execute(params, mockConfig)).rejects.toThrow(DbMcpError);
+      await expect(execute(params, mockConfig)).rejects.toMatchObject({
+        code: ErrorCode.INVALID_SQL,
+        message: 'Query has 0 placeholders but 1 parameter provided',
+      });
+    });
+  });
+
   describe('prepared statements', () => {
     it('should pass params to prepared statement', async () => {
       const params: ExecuteParams = {
@@ -415,6 +468,344 @@ describe('execute', () => {
 
       expect(result.executionTime).toBeGreaterThanOrEqual(0);
       expect(typeof result.executionTime).toBe('number');
+    });
+  });
+
+  describe('error handling', () => {
+    describe('database not found', () => {
+      it('should throw DATABASE_NOT_FOUND when database does not exist in config', async () => {
+        const params: ExecuteParams = {
+          database: 'nonexistent_db',
+          sql: 'INSERT INTO users (name) VALUES ($1)',
+          params: ['Alice'],
+        };
+
+        await expect(execute(params, mockConfig)).rejects.toThrow(DbMcpError);
+        await expect(execute(params, mockConfig)).rejects.toMatchObject({
+          code: ErrorCode.DATABASE_NOT_FOUND,
+          message: 'Database "nonexistent_db" not found in configuration',
+          details: {
+            database: 'nonexistent_db',
+            available: ['testdb', 'readonlydb'],
+          },
+        });
+
+        // Should not have called createAdapter
+        expect(mockCreateAdapter).not.toHaveBeenCalled();
+      });
+
+      it('should include all available databases in error details', async () => {
+        const configWithMultipleDbs: Config = {
+          databases: {
+            production: { url: 'postgresql://localhost:5432/prod', readonly: false },
+            staging: { url: 'postgresql://localhost:5432/staging', readonly: false },
+            analytics: { url: 'mysql://localhost:3306/analytics', readonly: true },
+          },
+          defaults: mockConfig.defaults,
+        };
+
+        const params: ExecuteParams = {
+          database: 'unknown_db',
+          sql: 'INSERT INTO logs (msg) VALUES ($1)',
+          params: ['test'],
+        };
+
+        try {
+          await execute(params, configWithMultipleDbs);
+          expect.fail('Should have thrown');
+        } catch (error) {
+          expect(error).toBeInstanceOf(DbMcpError);
+          const dbError = error as DbMcpError;
+          expect(dbError.code).toBe(ErrorCode.DATABASE_NOT_FOUND);
+          expect(dbError.details?.available).toEqual(['production', 'staging', 'analytics']);
+        }
+      });
+    });
+
+    describe('invalid SQL syntax', () => {
+      it('should propagate parse errors for malformed SQL', async () => {
+        const params: ExecuteParams = {
+          database: 'testdb',
+          sql: 'INSRET INTO users (name) VALUES ($1)', // Typo: INSRET instead of INSERT
+          params: ['Alice'],
+        };
+
+        const mockAdapter = createMockAdapter(
+          { fields: [], rows: [], rowCount: 0 },
+          {
+            validateQueryForTool: vi.fn().mockImplementation(() => {
+              throw new DbMcpError(
+                ErrorCode.INVALID_SQL,
+                'SQL parse error: unexpected token "INSRET"',
+                { sql: params.sql }
+              );
+            }),
+          }
+        );
+        mockCreateAdapter.mockReturnValue(mockAdapter);
+
+        await expect(execute(params, mockConfig)).rejects.toThrow(DbMcpError);
+        await expect(execute(params, mockConfig)).rejects.toMatchObject({
+          code: ErrorCode.INVALID_SQL,
+        });
+      });
+
+      it('should propagate database errors for table not found', async () => {
+        const params: ExecuteParams = {
+          database: 'testdb',
+          sql: 'INSERT INTO nonexistent_table (name) VALUES ($1)',
+          params: ['Alice'],
+        };
+
+        const mockAdapter: DatabaseAdapter = {
+          type: 'postgresql' as const,
+          withConnection: vi.fn().mockImplementation(async () => {
+            throw new Error('relation "nonexistent_table" does not exist');
+          }),
+          getDefaultSchema: vi.fn().mockReturnValue('public'),
+          dispose: vi.fn(),
+          parseQuery: vi.fn().mockReturnValue({
+            type: 'insert',
+            hasLimit: false,
+            isDangerous: false,
+            sql: params.sql,
+          }),
+          injectLimit: vi.fn(),
+          validateQueryForTool: vi.fn(),
+          getExplainPrefix: vi.fn().mockReturnValue('EXPLAIN '),
+          convertPlaceholders: vi.fn((sql) => sql),
+        };
+        mockCreateAdapter.mockReturnValue(mockAdapter);
+
+        await expect(execute(params, mockConfig)).rejects.toThrow('relation "nonexistent_table" does not exist');
+      });
+
+      it('should propagate database errors for column not found', async () => {
+        const params: ExecuteParams = {
+          database: 'testdb',
+          sql: 'UPDATE users SET nonexistent_column = $1 WHERE id = $2',
+          params: ['value', 1],
+        };
+
+        const mockAdapter: DatabaseAdapter = {
+          type: 'postgresql' as const,
+          withConnection: vi.fn().mockImplementation(async () => {
+            throw new Error('column "nonexistent_column" of relation "users" does not exist');
+          }),
+          getDefaultSchema: vi.fn().mockReturnValue('public'),
+          dispose: vi.fn(),
+          parseQuery: vi.fn().mockReturnValue({
+            type: 'update',
+            hasLimit: false,
+            isDangerous: false,
+            sql: params.sql,
+          }),
+          injectLimit: vi.fn(),
+          validateQueryForTool: vi.fn(),
+          getExplainPrefix: vi.fn().mockReturnValue('EXPLAIN '),
+          convertPlaceholders: vi.fn((sql) => sql),
+        };
+        mockCreateAdapter.mockReturnValue(mockAdapter);
+
+        await expect(execute(params, mockConfig)).rejects.toThrow('column "nonexistent_column"');
+      });
+    });
+
+    describe('connection errors', () => {
+      it('should propagate connection timeout errors', async () => {
+        const params: ExecuteParams = {
+          database: 'testdb',
+          sql: 'INSERT INTO users (name) VALUES ($1)',
+          params: ['Alice'],
+        };
+
+        const mockAdapter: DatabaseAdapter = {
+          type: 'postgresql' as const,
+          withConnection: vi.fn().mockImplementation(async () => {
+            throw new DbMcpError(
+              ErrorCode.QUERY_TIMEOUT,
+              'Query exceeded timeout of 30000ms',
+              { timeout: 30000 }
+            );
+          }),
+          getDefaultSchema: vi.fn().mockReturnValue('public'),
+          dispose: vi.fn(),
+          parseQuery: vi.fn().mockReturnValue({
+            type: 'insert',
+            hasLimit: false,
+            isDangerous: false,
+            sql: params.sql,
+          }),
+          injectLimit: vi.fn(),
+          validateQueryForTool: vi.fn(),
+          getExplainPrefix: vi.fn().mockReturnValue('EXPLAIN '),
+          convertPlaceholders: vi.fn((sql) => sql),
+        };
+        mockCreateAdapter.mockReturnValue(mockAdapter);
+
+        await expect(execute(params, mockConfig)).rejects.toThrow(DbMcpError);
+        await expect(execute(params, mockConfig)).rejects.toMatchObject({
+          code: ErrorCode.QUERY_TIMEOUT,
+        });
+      });
+
+      it('should propagate connection refused errors', async () => {
+        const params: ExecuteParams = {
+          database: 'testdb',
+          sql: 'DELETE FROM users WHERE id = $1',
+          params: [1],
+        };
+
+        const mockAdapter: DatabaseAdapter = {
+          type: 'postgresql' as const,
+          withConnection: vi.fn().mockImplementation(async () => {
+            throw new DbMcpError(
+              ErrorCode.CONNECTION_FAILED,
+              'Connection refused: ECONNREFUSED 127.0.0.1:5432',
+              { host: '127.0.0.1', port: 5432 }
+            );
+          }),
+          getDefaultSchema: vi.fn().mockReturnValue('public'),
+          dispose: vi.fn(),
+          parseQuery: vi.fn().mockReturnValue({
+            type: 'delete',
+            hasLimit: false,
+            isDangerous: false,
+            sql: params.sql,
+          }),
+          injectLimit: vi.fn(),
+          validateQueryForTool: vi.fn(),
+          getExplainPrefix: vi.fn().mockReturnValue('EXPLAIN '),
+          convertPlaceholders: vi.fn((sql) => sql),
+        };
+        mockCreateAdapter.mockReturnValue(mockAdapter);
+
+        await expect(execute(params, mockConfig)).rejects.toThrow(DbMcpError);
+        await expect(execute(params, mockConfig)).rejects.toMatchObject({
+          code: ErrorCode.CONNECTION_FAILED,
+        });
+      });
+
+      it('should handle authentication errors', async () => {
+        const params: ExecuteParams = {
+          database: 'testdb',
+          sql: 'UPDATE users SET active = true WHERE id = $1',
+          params: [1],
+        };
+
+        const mockAdapter: DatabaseAdapter = {
+          type: 'postgresql' as const,
+          withConnection: vi.fn().mockImplementation(async () => {
+            throw new Error('FATAL: password authentication failed for user "postgres"');
+          }),
+          getDefaultSchema: vi.fn().mockReturnValue('public'),
+          dispose: vi.fn(),
+          parseQuery: vi.fn().mockReturnValue({
+            type: 'update',
+            hasLimit: false,
+            isDangerous: false,
+            sql: params.sql,
+          }),
+          injectLimit: vi.fn(),
+          validateQueryForTool: vi.fn(),
+          getExplainPrefix: vi.fn().mockReturnValue('EXPLAIN '),
+          convertPlaceholders: vi.fn((sql) => sql),
+        };
+        mockCreateAdapter.mockReturnValue(mockAdapter);
+
+        await expect(execute(params, mockConfig)).rejects.toThrow('password authentication failed');
+      });
+    });
+
+    describe('multi-statement queries', () => {
+      it('should block multi-statement queries', async () => {
+        const params: ExecuteParams = {
+          database: 'testdb',
+          sql: 'INSERT INTO users (name) VALUES ($1); DROP TABLE users;',
+          params: ['Alice'],
+        };
+
+        const mockAdapter = createMockAdapter(
+          { fields: [], rows: [], rowCount: 0 },
+          {
+            validateQueryForTool: vi.fn().mockImplementation(() => {
+              throw new DbMcpError(
+                ErrorCode.MULTI_STATEMENT,
+                'Multi-statement queries are not allowed for security reasons',
+                { sql: params.sql }
+              );
+            }),
+          }
+        );
+        mockCreateAdapter.mockReturnValue(mockAdapter);
+
+        await expect(execute(params, mockConfig)).rejects.toThrow(DbMcpError);
+        await expect(execute(params, mockConfig)).rejects.toMatchObject({
+          code: ErrorCode.MULTI_STATEMENT,
+        });
+      });
+    });
+
+    describe('constraint violations', () => {
+      it('should propagate unique constraint violation errors', async () => {
+        const params: ExecuteParams = {
+          database: 'testdb',
+          sql: 'INSERT INTO users (email) VALUES ($1)',
+          params: ['duplicate@example.com'],
+        };
+
+        const mockAdapter: DatabaseAdapter = {
+          type: 'postgresql' as const,
+          withConnection: vi.fn().mockImplementation(async () => {
+            throw new Error('duplicate key value violates unique constraint "users_email_key"');
+          }),
+          getDefaultSchema: vi.fn().mockReturnValue('public'),
+          dispose: vi.fn(),
+          parseQuery: vi.fn().mockReturnValue({
+            type: 'insert',
+            hasLimit: false,
+            isDangerous: false,
+            sql: params.sql,
+          }),
+          injectLimit: vi.fn(),
+          validateQueryForTool: vi.fn(),
+          getExplainPrefix: vi.fn().mockReturnValue('EXPLAIN '),
+          convertPlaceholders: vi.fn((sql) => sql),
+        };
+        mockCreateAdapter.mockReturnValue(mockAdapter);
+
+        await expect(execute(params, mockConfig)).rejects.toThrow('duplicate key value violates unique constraint');
+      });
+
+      it('should propagate foreign key constraint violation errors', async () => {
+        const params: ExecuteParams = {
+          database: 'testdb',
+          sql: 'INSERT INTO orders (user_id) VALUES ($1)',
+          params: [99999],
+        };
+
+        const mockAdapter: DatabaseAdapter = {
+          type: 'postgresql' as const,
+          withConnection: vi.fn().mockImplementation(async () => {
+            throw new Error('insert or update on table "orders" violates foreign key constraint "orders_user_id_fkey"');
+          }),
+          getDefaultSchema: vi.fn().mockReturnValue('public'),
+          dispose: vi.fn(),
+          parseQuery: vi.fn().mockReturnValue({
+            type: 'insert',
+            hasLimit: false,
+            isDangerous: false,
+            sql: params.sql,
+          }),
+          injectLimit: vi.fn(),
+          validateQueryForTool: vi.fn(),
+          getExplainPrefix: vi.fn().mockReturnValue('EXPLAIN '),
+          convertPlaceholders: vi.fn((sql) => sql),
+        };
+        mockCreateAdapter.mockReturnValue(mockAdapter);
+
+        await expect(execute(params, mockConfig)).rejects.toThrow('violates foreign key constraint');
+      });
     });
   });
 

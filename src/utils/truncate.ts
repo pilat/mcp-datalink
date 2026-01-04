@@ -2,6 +2,8 @@
  * Truncation utilities for limiting MCP response sizes
  */
 
+import { safeJsonStringify } from './formatter.js';
+
 export interface TruncationInfo {
   truncated: boolean;
   truncationReason?: 'maxRows' | 'maxCellLength' | 'maxTotalSize' | 'maxColumns';
@@ -10,9 +12,6 @@ export interface TruncationInfo {
   hint?: string;
 }
 
-/**
- * Truncate array of rows to maxRows limit
- */
 export function truncateRows(
   rows: unknown[][],
   maxRows: number,
@@ -39,9 +38,6 @@ export function truncateRows(
   };
 }
 
-/**
- * Truncate individual cell value to maxLength
- */
 export function truncateCell(
   value: unknown,
   maxLength: number
@@ -58,7 +54,7 @@ export function truncateCell(
   } else if (value instanceof Date) {
     stringValue = value.toISOString();
   } else if (typeof value === 'object') {
-    stringValue = JSON.stringify(value);
+    stringValue = safeJsonStringify(value);
   } else {
     stringValue = String(value);
   }
@@ -70,16 +66,27 @@ export function truncateCell(
     };
   }
 
+  // Account for ellipsis length (3 chars) when truncating
+  const ellipsis = '...';
+
+  // Edge case: if maxLength is too small for ellipsis, just truncate without it
+  if (maxLength < ellipsis.length) {
+    return {
+      value: stringValue.slice(0, maxLength),
+      truncated: true,
+      originalLength: stringValue.length,
+    };
+  }
+
+  const truncateAt = maxLength - ellipsis.length;
+
   return {
-    value: stringValue.slice(0, maxLength) + '...',
+    value: stringValue.slice(0, truncateAt) + ellipsis,
     truncated: true,
     originalLength: stringValue.length,
   };
 }
 
-/**
- * Truncate columns array to maxColumns limit
- */
 export function truncateColumns(
   columns: string[],
   maxColumns: number
@@ -97,22 +104,42 @@ export function truncateColumns(
   };
 }
 
-/**
- * Check if total response size exceeds maxSize
- */
 export function checkTotalSize(
   data: string,
   maxSize: number
-): TruncationInfo {
+): { data: string; info: TruncationInfo } {
   const byteLength = Buffer.byteLength(data, 'utf8');
 
   if (byteLength <= maxSize) {
-    return { truncated: false };
+    return { data, info: { truncated: false } };
   }
 
+  // Truncate to fit within maxSize bytes
+  // We need to be careful with multi-byte UTF-8 characters
+  // Binary search for the right character position
+  let low = 0;
+  let high = data.length;
+
+  while (low < high) {
+    const mid = Math.floor((low + high + 1) / 2);
+    const slice = data.slice(0, mid);
+    const sliceBytes = Buffer.byteLength(slice, 'utf8');
+
+    if (sliceBytes <= maxSize) {
+      low = mid;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  const truncatedData = data.slice(0, low);
+
   return {
-    truncated: true,
-    truncationReason: 'maxTotalSize',
-    hint: 'Use LIMIT/OFFSET or WHERE clause to paginate',
+    data: truncatedData,
+    info: {
+      truncated: true,
+      truncationReason: 'maxTotalSize',
+      hint: 'Use LIMIT/OFFSET or WHERE clause to paginate',
+    },
   };
 }

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { listTables } from './list-tables.js';
 import type { Config, TableInfo } from '../types.js';
+import { DbMcpError, ErrorCode } from '../utils/errors.js';
 
 // Mock the adapters module
 vi.mock('../adapters/index.js', () => ({
@@ -202,6 +203,150 @@ describe('listTables', () => {
 
     expect(result.tables).toEqual([]);
     expect(result.truncated).toBe(false);
+  });
+
+  describe('error handling', () => {
+    describe('database not found', () => {
+      it('should throw DATABASE_NOT_FOUND when database does not exist in config', async () => {
+        const config = createConfig();
+
+        await expect(listTables({ database: 'nonexistent_db' }, config)).rejects.toThrow(DbMcpError);
+        await expect(listTables({ database: 'nonexistent_db' }, config)).rejects.toMatchObject({
+          code: ErrorCode.DATABASE_NOT_FOUND,
+          message: 'Database "nonexistent_db" not found in configuration',
+          details: {
+            database: 'nonexistent_db',
+            available: ['testdb'],
+          },
+        });
+
+        // Should not have called createAdapter
+        expect(mockCreateAdapter).not.toHaveBeenCalled();
+      });
+
+      it('should include all available databases in error details', async () => {
+        const configWithMultipleDbs: Config = {
+          databases: {
+            production: { url: 'postgresql://localhost:5432/prod', readonly: false },
+            staging: { url: 'postgresql://localhost:5432/staging', readonly: false },
+            analytics: { url: 'mysql://localhost:3306/analytics', readonly: true },
+          },
+          defaults: {
+            maxRows: 100,
+            maxCellLength: 500,
+            maxTotalSize: 65536,
+            maxColumns: 50,
+            maxTables: 200,
+            maxIndexes: 20,
+            timeout: 30000,
+          },
+        };
+
+        try {
+          await listTables({ database: 'unknown_db' }, configWithMultipleDbs);
+          expect.fail('Should have thrown');
+        } catch (error) {
+          expect(error).toBeInstanceOf(DbMcpError);
+          const dbError = error as DbMcpError;
+          expect(dbError.code).toBe(ErrorCode.DATABASE_NOT_FOUND);
+          expect(dbError.details?.available).toEqual(['production', 'staging', 'analytics']);
+        }
+      });
+    });
+
+    describe('connection errors', () => {
+      it('should propagate connection timeout errors', async () => {
+        const mockAdapter = {
+          type: 'postgresql' as const,
+          withConnection: vi.fn().mockImplementation(async () => {
+            throw new DbMcpError(
+              ErrorCode.QUERY_TIMEOUT,
+              'Query exceeded timeout of 30000ms',
+              { timeout: 30000 }
+            );
+          }),
+          getDialect: vi.fn(),
+          getDefaultSchema: vi.fn().mockReturnValue('public'),
+          dispose: vi.fn(),
+        };
+        mockCreateAdapter.mockReturnValue(mockAdapter);
+
+        const config = createConfig();
+
+        await expect(listTables({ database: 'testdb' }, config)).rejects.toThrow(DbMcpError);
+        await expect(listTables({ database: 'testdb' }, config)).rejects.toMatchObject({
+          code: ErrorCode.QUERY_TIMEOUT,
+        });
+      });
+
+      it('should propagate connection refused errors', async () => {
+        const mockAdapter = {
+          type: 'postgresql' as const,
+          withConnection: vi.fn().mockImplementation(async () => {
+            throw new DbMcpError(
+              ErrorCode.CONNECTION_FAILED,
+              'Connection refused: ECONNREFUSED 127.0.0.1:5432',
+              { host: '127.0.0.1', port: 5432 }
+            );
+          }),
+          getDialect: vi.fn(),
+          getDefaultSchema: vi.fn().mockReturnValue('public'),
+          dispose: vi.fn(),
+        };
+        mockCreateAdapter.mockReturnValue(mockAdapter);
+
+        const config = createConfig();
+
+        await expect(listTables({ database: 'testdb' }, config)).rejects.toThrow(DbMcpError);
+        await expect(listTables({ database: 'testdb' }, config)).rejects.toMatchObject({
+          code: ErrorCode.CONNECTION_FAILED,
+          message: 'Connection refused: ECONNREFUSED 127.0.0.1:5432',
+        });
+      });
+
+      it('should handle authentication errors', async () => {
+        const mockAdapter = {
+          type: 'postgresql' as const,
+          withConnection: vi.fn().mockImplementation(async () => {
+            throw new Error('FATAL: password authentication failed for user "postgres"');
+          }),
+          getDialect: vi.fn(),
+          getDefaultSchema: vi.fn().mockReturnValue('public'),
+          dispose: vi.fn(),
+        };
+        mockCreateAdapter.mockReturnValue(mockAdapter);
+
+        const config = createConfig();
+
+        await expect(listTables({ database: 'testdb' }, config)).rejects.toThrow('password authentication failed');
+      });
+    });
+
+    describe('schema errors', () => {
+      it('should propagate errors for non-existent schema', async () => {
+        const mockAdapter = {
+          type: 'postgresql' as const,
+          withConnection: vi.fn().mockImplementation(async (fn) => {
+            const mockConn = {
+              listTables: vi.fn().mockImplementation(async () => {
+                throw new Error('schema "nonexistent_schema" does not exist');
+              }),
+            };
+            return fn(mockConn);
+          }),
+          getDialect: vi.fn(),
+          getDefaultSchema: vi.fn().mockReturnValue('public'),
+          dispose: vi.fn(),
+        };
+        mockCreateAdapter.mockReturnValue(mockAdapter);
+
+        const config = createConfig();
+
+        await expect(
+          listTables({ database: 'testdb', schema: 'nonexistent_schema' }, config)
+        ).rejects.toThrow('schema "nonexistent_schema" does not exist');
+      });
+    });
   });
 
   it('converts rows_estimate to number', async () => {

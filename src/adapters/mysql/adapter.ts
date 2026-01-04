@@ -5,29 +5,31 @@
  * Uses mysql2/promise driver with per-request connection recycling.
  */
 
-import type {
-  Connection as MySql2Connection,
-  FieldPacket,
-  RowDataPacket,
-} from 'mysql2/promise';
 import * as mysql from 'mysql2/promise';
+
+import type { Connection as MySql2Connection, FieldPacket, RowDataPacket } from 'mysql2/promise';
 import type {
-  DatabaseAdapter,
-  AdapterConnection,
-  RawQueryResult,
   AdapterConfig,
+  AdapterConnection,
+  DatabaseAdapter,
   ListTablesInternalResult,
+  RawQueryResult,
 } from '../types.js';
 import type {
+  ColumnInfo,
+  ForeignKeyInfo,
+  IndexInfo,
   ParsedQuery,
-  QueryType,
   TableDescription,
   TableInfo,
-  ColumnInfo,
-  IndexInfo,
-  ForeignKeyInfo,
 } from '../../types.js';
+
 import { DbMcpError, ErrorCode } from '../../utils/errors.js';
+import {
+  injectLimit as sharedInjectLimit,
+  parseQuery as sharedParseQuery,
+  validateQueryForTool as sharedValidateQueryForTool,
+} from '../../utils/sql-parser.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SQL Dialect helpers (formerly in dialect.ts)
@@ -35,6 +37,7 @@ import { DbMcpError, ErrorCode } from '../../utils/errors.js';
 
 /**
  * MySQL-specific dangerous patterns
+ * These patterns bypass parser-level detection and need raw SQL matching
  */
 const DANGEROUS_MYSQL_PATTERNS: ReadonlyArray<{
   pattern: RegExp;
@@ -59,178 +62,6 @@ const DANGEROUS_MYSQL_PATTERNS: ReadonlyArray<{
 ];
 
 /**
- * Standard dangerous SQL operations (DDL/DCL)
- */
-const DANGEROUS_PREFIXES: ReadonlyArray<string> = [
-  'DROP',
-  'TRUNCATE',
-  'ALTER',
-  'CREATE',
-  'GRANT',
-  'REVOKE',
-  'RENAME',
-];
-
-/**
- * Strip SQL comments from a query
- */
-function stripComments(sql: string): string {
-  let result = '';
-  let i = 0;
-  const len = sql.length;
-
-  while (i < len) {
-    const char = sql[i];
-    const nextChar = sql[i + 1];
-
-    // Handle strings - preserve content inside quotes
-    if (char === "'" || char === '"' || char === '`') {
-      const quote = char;
-      result += char;
-      i++;
-
-      while (i < len) {
-        const c = sql[i];
-        result += c;
-        i++;
-
-        if (c === '\\' && i < len) {
-          result += sql[i];
-          i++;
-        } else if (c === quote) {
-          if (sql[i] === quote) {
-            result += sql[i];
-            i++;
-          } else {
-            break;
-          }
-        }
-      }
-      continue;
-    }
-
-    // Handle single-line comment: --
-    if (char === '-' && nextChar === '-') {
-      i += 2;
-      while (i < len && sql[i] !== '\n') {
-        i++;
-      }
-      result += ' ';
-      continue;
-    }
-
-    // Handle single-line comment: # (MySQL-specific)
-    if (char === '#') {
-      i++;
-      while (i < len && sql[i] !== '\n') {
-        i++;
-      }
-      result += ' ';
-      continue;
-    }
-
-    // Handle multi-line comment: /* */
-    if (char === '/' && nextChar === '*') {
-      i += 2;
-      while (i < len - 1) {
-        if (sql[i] === '*' && sql[i + 1] === '/') {
-          i += 2;
-          break;
-        }
-        i++;
-      }
-      result += ' ';
-      continue;
-    }
-
-    result += char;
-    i++;
-  }
-
-  return result;
-}
-
-/**
- * String-aware statement splitting
- */
-function splitStatements(sql: string): string[] {
-  const statements: string[] = [];
-  let current = '';
-  let i = 0;
-  const len = sql.length;
-
-  while (i < len) {
-    const char = sql[i];
-
-    // Handle strings - don't split inside quotes
-    if (char === "'" || char === '"' || char === '`') {
-      const quote = char;
-      current += char;
-      i++;
-
-      while (i < len) {
-        const c = sql[i];
-        current += c;
-        i++;
-
-        if (c === '\\' && i < len) {
-          current += sql[i];
-          i++;
-        } else if (c === quote) {
-          if (sql[i] === quote) {
-            current += sql[i];
-            i++;
-          } else {
-            break;
-          }
-        }
-      }
-      continue;
-    }
-
-    // Handle semicolon - split point
-    if (char === ';') {
-      const trimmed = current.trim();
-      if (trimmed.length > 0) {
-        statements.push(trimmed);
-      }
-      current = '';
-      i++;
-      continue;
-    }
-
-    current += char;
-    i++;
-  }
-
-  const trimmed = current.trim();
-  if (trimmed.length > 0) {
-    statements.push(trimmed);
-  }
-
-  return statements;
-}
-
-/**
- * Detect query type from normalized SQL
- */
-function detectQueryType(normalizedSql: string): QueryType {
-  if (normalizedSql.startsWith('SELECT') || normalizedSql.startsWith('WITH')) {
-    return 'select';
-  }
-  if (normalizedSql.startsWith('INSERT')) {
-    return 'insert';
-  }
-  if (normalizedSql.startsWith('UPDATE')) {
-    return 'update';
-  }
-  if (normalizedSql.startsWith('DELETE')) {
-    return 'delete';
-  }
-  return 'other';
-}
-
-/**
  * Check if SQL contains dangerous MySQL-specific patterns
  */
 function checkMySqlDangerousPatterns(
@@ -242,35 +73,6 @@ function checkMySqlDangerousPatterns(
     }
   }
   return { isDangerous: false };
-}
-
-/**
- * Check if SQL starts with a dangerous prefix (DDL/DCL)
- */
-function checkDangerousPrefix(
-  normalizedSql: string
-): { isDangerous: boolean; reason?: string } {
-  for (const prefix of DANGEROUS_PREFIXES) {
-    if (
-      normalizedSql.startsWith(prefix + ' ') ||
-      normalizedSql.startsWith(prefix + '\t') ||
-      normalizedSql.startsWith(prefix + '\n') ||
-      normalizedSql === prefix
-    ) {
-      return {
-        isDangerous: true,
-        reason: `${prefix} statements are not allowed`,
-      };
-    }
-  }
-  return { isDangerous: false };
-}
-
-/**
- * Check if a SELECT query has a LIMIT clause
- */
-function hasLimitClause(sql: string): boolean {
-  return /\bLIMIT\s+\d+/i.test(sql);
 }
 
 /**
@@ -289,9 +91,6 @@ export class MySqlAdapter implements DatabaseAdapter {
     this.timeout = config.defaults.timeout;
   }
 
-  /**
-   * Get the default schema name for MySQL (database name from URL)
-   */
   getDefaultSchema(): string {
     try {
       const url = new URL(this.connectionUrl);
@@ -305,31 +104,9 @@ export class MySqlAdapter implements DatabaseAdapter {
   // SQL Dialect methods
   // ─────────────────────────────────────────────────────────────────────────────
 
-  /**
-   * Parse and validate a SQL query
-   */
   parseQuery(sql: string): ParsedQuery {
-    const withoutComments = stripComments(sql);
-    const statements = splitStatements(withoutComments);
-
-    if (statements.length === 0) {
-      throw new DbMcpError(ErrorCode.INVALID_SQL, 'No valid SQL statement found', {
-        sql,
-      });
-    }
-
-    if (statements.length > 1) {
-      throw new DbMcpError(
-        ErrorCode.MULTI_STATEMENT,
-        'Multiple SQL statements are not allowed. Please provide a single statement.',
-        { sql, statementCount: statements.length }
-      );
-    }
-
-    const statement = statements[0];
-    const normalizedSql = statement.trim().toUpperCase();
-
-    const mysqlDanger = checkMySqlDangerousPatterns(statement);
+    // First check for MySQL-specific dangerous patterns (before parsing)
+    const mysqlDanger = checkMySqlDangerousPatterns(sql);
     if (mysqlDanger.isDangerous) {
       return {
         type: 'other',
@@ -340,93 +117,24 @@ export class MySqlAdapter implements DatabaseAdapter {
       };
     }
 
-    const prefixDanger = checkDangerousPrefix(normalizedSql);
-    if (prefixDanger.isDangerous) {
-      return {
-        type: 'other',
-        hasLimit: false,
-        isDangerous: true,
-        dangerousReason: prefixDanger.reason,
-        sql,
-      };
-    }
-
-    const queryType = detectQueryType(normalizedSql);
-    const hasLimit = queryType === 'select' ? hasLimitClause(statement) : false;
-
-    return {
-      type: queryType,
-      hasLimit,
-      isDangerous: false,
-      sql,
-    };
+    // Use shared parser for standard validation
+    return sharedParseQuery(sql, 'MySQL');
   }
 
-  /**
-   * Inject a LIMIT clause into a SELECT query if it doesn't have one
-   */
   injectLimit(sql: string, limit: number): string {
-    if (hasLimitClause(sql)) {
-      return sql;
-    }
-    const trimmed = sql.replace(/;\s*$/, '').trim();
-    return `${trimmed} LIMIT ${limit}`;
+    return sharedInjectLimit(sql, limit, 'MySQL');
   }
 
-  /**
-   * Validate that a SQL query is appropriate for a specific tool
-   */
   validateQueryForTool(sql: string, tool: 'query' | 'execute'): void {
     const parsed = this.parseQuery(sql);
-
-    if (tool === 'query') {
-      if (parsed.type !== 'select') {
-        throw new DbMcpError(
-          ErrorCode.QUERY_BLOCKED,
-          'The query tool only accepts SELECT statements. Use the execute tool for ' +
-            parsed.type.toUpperCase() +
-            ' statements.',
-          { sql, queryType: parsed.type, tool }
-        );
-      }
-    } else if (tool === 'execute') {
-      if (parsed.type === 'select') {
-        throw new DbMcpError(
-          ErrorCode.QUERY_BLOCKED,
-          'The execute tool does not accept SELECT statements. Use the query tool instead.',
-          { sql, queryType: parsed.type, tool }
-        );
-      }
-
-      if (parsed.isDangerous) {
-        throw new DbMcpError(
-          ErrorCode.QUERY_BLOCKED,
-          parsed.dangerousReason ?? 'This operation is not allowed',
-          { sql, queryType: parsed.type, tool }
-        );
-      }
-
-      const allowedTypes: QueryType[] = ['insert', 'update', 'delete'];
-      if (!allowedTypes.includes(parsed.type)) {
-        throw new DbMcpError(
-          ErrorCode.QUERY_BLOCKED,
-          'The execute tool only accepts INSERT, UPDATE, or DELETE statements.',
-          { sql, queryType: parsed.type, tool }
-        );
-      }
-    }
+    sharedValidateQueryForTool(parsed, tool);
   }
 
-  /**
-   * Get the EXPLAIN prefix for MySQL
-   */
   getExplainPrefix(analyze: boolean): string {
     return analyze ? 'EXPLAIN ANALYZE ' : 'EXPLAIN ';
   }
 
-  /**
-   * Convert PostgreSQL-style placeholders ($1, $2) to MySQL-style (?)
-   */
+  /** Convert $1, $2 placeholders to ? for MySQL */
   convertPlaceholders(sql: string): string {
     return sql.replace(/\$\d+/g, '?');
   }
@@ -435,6 +143,14 @@ export class MySqlAdapter implements DatabaseAdapter {
    * Execute a function with a managed MySQL connection
    */
   async withConnection<T>(fn: (conn: AdapterConnection) => Promise<T>): Promise<T> {
+    // Validate timeout before creating connection (SET command doesn't support parameters)
+    if (!Number.isInteger(this.timeout) || this.timeout < 0) {
+      throw new DbMcpError(
+        ErrorCode.CONNECTION_FAILED,
+        `Invalid timeout value: ${this.timeout}`
+      );
+    }
+
     let connection: MySql2Connection;
 
     try {
@@ -450,25 +166,12 @@ export class MySqlAdapter implements DatabaseAdapter {
     }
 
     try {
-      // SET command doesn't support parameterized queries, so validate timeout first
-      if (!Number.isInteger(this.timeout) || this.timeout < 0) {
-        throw new DbMcpError(
-          ErrorCode.CONNECTION_FAILED,
-          `Invalid timeout value: ${this.timeout}`
-        );
-      }
-
-      // Try to set max_execution_time (MySQL 5.7.8+)
-      // Gracefully handle older versions that don't support it
       try {
         await connection.execute(`SET max_execution_time = ${this.timeout}`);
-      } catch (error) {
-        // Silently ignore if max_execution_time is not supported (older MySQL)
-        // The query will still run, just without execution timeout
-        // Log for debugging purposes would go here in production
+      } catch {
+        // max_execution_time not supported (MySQL < 5.7.8)
       }
 
-      // Create connection wrapper and execute user function
       const adapter = new MySqlConnection(connection);
       return await fn(adapter);
     } finally {
@@ -476,12 +179,8 @@ export class MySqlAdapter implements DatabaseAdapter {
     }
   }
 
-  /**
-   * Clean up resources (no persistent resources in this adapter)
-   */
   async dispose(): Promise<void> {
-    // No persistent resources to clean up
-    // Each connection is created and destroyed per request
+    // No persistent connections to clean up
   }
 }
 
@@ -494,9 +193,6 @@ export class MySqlAdapter implements DatabaseAdapter {
 class MySqlConnection implements AdapterConnection {
   constructor(private readonly conn: MySql2Connection) {}
 
-  /**
-   * Execute a parameterized query using prepared statements
-   */
   async query(sql: string, params?: unknown[]): Promise<RawQueryResult> {
     const [result, fields] = await this.conn.execute<RowDataPacket[]>(
       sql,
@@ -526,9 +222,6 @@ class MySqlConnection implements AdapterConnection {
     };
   }
 
-  /**
-   * Execute a raw SQL statement (for BEGIN, COMMIT, ROLLBACK)
-   */
   async execute(sql: string): Promise<void> {
     await this.conn.query(sql);
   }
@@ -537,8 +230,12 @@ class MySqlConnection implements AdapterConnection {
    * List tables in a MySQL database (schema = database in MySQL terminology)
    *
    * Uses information_schema.TABLES for table metadata.
+   * Note: LIMIT is interpolated (not parameterized) because MySQL prepared
+   * statements don't support LIMIT as a parameter. The value is validated
+   * as a number so this is safe.
    */
-  async listTables(schema: string, _maxTables: number): Promise<ListTablesInternalResult> {
+  async listTables(schema: string, maxTables: number): Promise<ListTablesInternalResult> {
+    const limit = Math.max(1, Math.floor(maxTables)) + 1;
     const sql = `
       SELECT
         TABLE_NAME as name,
@@ -548,11 +245,13 @@ class MySqlConnection implements AdapterConnection {
       FROM information_schema.TABLES
       WHERE TABLE_SCHEMA = ?
       ORDER BY TABLE_NAME
+      LIMIT ${limit}
     `;
 
     const [rows] = await this.conn.execute<RowDataPacket[]>(sql, [schema]);
 
-    const tables: TableInfo[] = rows.map((row) => ({
+    const truncated = rows.length > maxTables;
+    const tables: TableInfo[] = rows.slice(0, maxTables).map((row) => ({
       name: row.name as string,
       schema: row.schema as string,
       type: row.type as 'table' | 'view',
@@ -561,7 +260,8 @@ class MySqlConnection implements AdapterConnection {
 
     return {
       tables,
-      totalAvailable: tables.length,
+      truncated,
+      totalAvailable: truncated ? rows.length : tables.length,
     };
   }
 
@@ -636,7 +336,6 @@ class MySqlConnection implements AdapterConnection {
     const [indexesRows] = indexesResult;
     const [foreignKeysRows] = foreignKeysResult;
 
-    // Build columns array
     const allColumns: ColumnInfo[] = columnsRows.map((row) => ({
       name: row.name as string,
       type: row.type as string,
@@ -645,15 +344,13 @@ class MySqlConnection implements AdapterConnection {
       primaryKey: Boolean(row.primaryKey),
     }));
 
-    // Build indexes array
     const allIndexes: IndexInfo[] = indexesRows.map((row) => ({
       name: row.name as string,
-      columns: (row.columns as string).split(','),
+      columns: row.columns ? String(row.columns).split(',').filter(Boolean) : [],
       unique: Boolean(row.unique),
       primary: Boolean(row.primary),
     }));
 
-    // Build foreign keys array
     const foreignKeys: ForeignKeyInfo[] = foreignKeysRows.map((row) => ({
       column: row.column as string,
       references: {
@@ -662,7 +359,6 @@ class MySqlConnection implements AdapterConnection {
       },
     }));
 
-    // Apply limits and track truncation
     let truncated = false;
     const truncationReasons: string[] = [];
 
@@ -696,5 +392,3 @@ class MySqlConnection implements AdapterConnection {
   }
 }
 
-// Export helper functions for testing
-export { stripComments, splitStatements };

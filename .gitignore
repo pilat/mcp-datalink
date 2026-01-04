@@ -1,6 +1,8 @@
 node_modules/
 dist/
+coverage/
 *.js
+!eslint.config.js
 *.d.ts
 *.js.map
 test-data/

@@ -2,16 +2,13 @@
  * Database Adapter Factory
  *
  * Creates the appropriate database adapter based on connection URL scheme.
- *
- * Phase 1: PostgreSQL - DONE
- * Phase 2: MySQL - DONE
- * Phase 3: SQLite - DONE
  */
 
-import type { DatabaseAdapter, AdapterConfig } from './types.js';
+import type { AdapterConfig, DatabaseAdapter } from './types.js';
 import type { DatabaseConfig, DefaultsConfig } from '../types.js';
-import { PostgreSqlAdapter } from './postgresql/adapter.js';
+
 import { MySqlAdapter } from './mysql/adapter.js';
+import { PostgreSqlAdapter } from './postgresql/adapter.js';
 import { SqliteAdapter } from './sqlite/adapter.js';
 import { DbMcpError, ErrorCode } from '../utils/errors.js';
 
@@ -138,9 +135,8 @@ export function isSupportedUrl(url: string): boolean {
  */
 export function isImplemented(url: string): boolean {
   try {
-    const scheme = detectScheme(url);
-    // All three database types are now implemented (Phase 1-3)
-    return scheme === 'postgresql' || scheme === 'mysql' || scheme === 'sqlite';
+    detectScheme(url);
+    return true;
   } catch {
     return false;
   }
