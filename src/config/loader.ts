@@ -34,8 +34,20 @@ const DEFAULT_CONFIG: DefaultsConfig = {
 };
 
 /**
+ * Parse a positive integer from a string, returning undefined for invalid values.
+ */
+function parsePositiveInt(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = parseInt(value, 10);
+  if (Number.isNaN(parsed) || parsed <= 0) return undefined;
+  return parsed;
+}
+
+/**
  * Extract databases from DATALINK_{NAME}_URL environment variables.
- * Also supports DATALINK_{NAME}_READONLY=true for read-only mode.
+ * Also supports:
+ * - DATALINK_{NAME}_READONLY=true for read-only mode
+ * - DATALINK_{NAME}_MAX_TIMEOUT for maximum query timeout (in milliseconds)
  */
 function getDatabasesFromEnv(): Record<string, DatabaseConfig> {
   const databases: Record<string, DatabaseConfig> = {};
@@ -47,10 +59,13 @@ function getDatabasesFromEnv(): Record<string, DatabaseConfig> {
       const name = match[1].toLowerCase();
       const readonlyKey = `DATALINK_${match[1]}_READONLY`;
       const readonlyValue = process.env[readonlyKey];
+      const maxTimeoutKey = `DATALINK_${match[1]}_MAX_TIMEOUT`;
+      const maxTimeoutValue = process.env[maxTimeoutKey];
 
       databases[name] = {
         url: expandEnvVariables(value),
         readonly: readonlyValue === 'true' || readonlyValue === '1',
+        maxTimeout: parsePositiveInt(maxTimeoutValue),
       };
     }
   }

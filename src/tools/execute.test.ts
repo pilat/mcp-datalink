@@ -809,6 +809,142 @@ describe('execute', () => {
     });
   });
 
+  describe('timeout parameter', () => {
+    it('should pass timeout to adapter when specified', async () => {
+      const params: ExecuteParams = {
+        database: 'testdb',
+        sql: 'INSERT INTO users (name) VALUES ($1)',
+        params: ['Alice'],
+        timeout: 60000,
+      };
+
+      let capturedTimeout: number | undefined;
+
+      const mockAdapter: DatabaseAdapter = {
+        type: 'postgresql' as const,
+        withConnection: vi.fn().mockImplementation(async (fn, options) => {
+          capturedTimeout = options?.timeout;
+          const mockConn = {
+            query: vi.fn().mockResolvedValue({
+              fields: [],
+              rows: [],
+              rowCount: 1,
+            }),
+            execute: vi.fn(),
+            listTables: vi.fn(),
+            describeTable: vi.fn(),
+          };
+          return fn(mockConn);
+        }),
+        getDefaultSchema: vi.fn().mockReturnValue('public'),
+        dispose: vi.fn(),
+        parseQuery: vi.fn().mockReturnValue({ type: 'insert', hasLimit: false, isDangerous: false, sql: params.sql }),
+        injectLimit: vi.fn(),
+        validateQueryForTool: vi.fn(),
+        getExplainPrefix: vi.fn().mockReturnValue('EXPLAIN '),
+        convertPlaceholders: vi.fn((sql) => sql),
+      };
+      mockCreateAdapter.mockReturnValue(mockAdapter);
+
+      await execute(params, mockConfig);
+
+      expect(capturedTimeout).toBe(60000);
+    });
+
+    it('should use default timeout when not specified', async () => {
+      const params: ExecuteParams = {
+        database: 'testdb',
+        sql: 'INSERT INTO users (name) VALUES ($1)',
+        params: ['Alice'],
+      };
+
+      let capturedTimeout: number | undefined;
+
+      const mockAdapter: DatabaseAdapter = {
+        type: 'postgresql' as const,
+        withConnection: vi.fn().mockImplementation(async (fn, options) => {
+          capturedTimeout = options?.timeout;
+          const mockConn = {
+            query: vi.fn().mockResolvedValue({
+              fields: [],
+              rows: [],
+              rowCount: 1,
+            }),
+            execute: vi.fn(),
+            listTables: vi.fn(),
+            describeTable: vi.fn(),
+          };
+          return fn(mockConn);
+        }),
+        getDefaultSchema: vi.fn().mockReturnValue('public'),
+        dispose: vi.fn(),
+        parseQuery: vi.fn().mockReturnValue({ type: 'insert', hasLimit: false, isDangerous: false, sql: params.sql }),
+        injectLimit: vi.fn(),
+        validateQueryForTool: vi.fn(),
+        getExplainPrefix: vi.fn().mockReturnValue('EXPLAIN '),
+        convertPlaceholders: vi.fn((sql) => sql),
+      };
+      mockCreateAdapter.mockReturnValue(mockAdapter);
+
+      await execute(params, mockConfig);
+
+      expect(capturedTimeout).toBe(30000);
+    });
+
+    it('should cap timeout at database maxTimeout', async () => {
+      const configWithMaxTimeout: Config = {
+        databases: {
+          testdb: {
+            url: 'postgresql://localhost:5432/test',
+            readonly: false,
+            maxTimeout: 60000,
+          },
+          readonlydb: mockConfig.databases.readonlydb,
+        },
+        defaults: mockConfig.defaults,
+      };
+
+      const params: ExecuteParams = {
+        database: 'testdb',
+        sql: 'INSERT INTO users (name) VALUES ($1)',
+        params: ['Alice'],
+        timeout: 120000,
+      };
+
+      let capturedTimeout: number | undefined;
+
+      const mockAdapter: DatabaseAdapter = {
+        type: 'postgresql' as const,
+        withConnection: vi.fn().mockImplementation(async (fn, options) => {
+          capturedTimeout = options?.timeout;
+          const mockConn = {
+            query: vi.fn().mockResolvedValue({
+              fields: [],
+              rows: [],
+              rowCount: 1,
+            }),
+            execute: vi.fn(),
+            listTables: vi.fn(),
+            describeTable: vi.fn(),
+          };
+          return fn(mockConn);
+        }),
+        getDefaultSchema: vi.fn().mockReturnValue('public'),
+        dispose: vi.fn(),
+        parseQuery: vi.fn().mockReturnValue({ type: 'insert', hasLimit: false, isDangerous: false, sql: params.sql }),
+        injectLimit: vi.fn(),
+        validateQueryForTool: vi.fn(),
+        getExplainPrefix: vi.fn().mockReturnValue('EXPLAIN '),
+        convertPlaceholders: vi.fn((sql) => sql),
+      };
+      mockCreateAdapter.mockReturnValue(mockAdapter);
+
+      await execute(params, configWithMaxTimeout);
+
+      expect(capturedTimeout).toBe(60000);
+    });
+  });
+
   describe('rowCount handling', () => {
     it('should handle zero rowCount', async () => {
       const params: ExecuteParams = {

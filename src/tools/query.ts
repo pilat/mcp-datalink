@@ -6,6 +6,7 @@ import type { Config, QueryParams, QueryResult } from '../types.js';
 
 import { createAdapter } from '../adapters/index.js';
 import { formatAsMarkdownTable, formatValue } from '../utils/formatter.js';
+import { calculateTimeout } from '../utils/timeout.js';
 import { truncateCell, truncateRows } from '../utils/truncate.js';
 import { getValidatedDatabase, validateParamCount } from '../utils/validation.js';
 
@@ -66,9 +67,15 @@ export async function query(
 
   sql = adapter.convertPlaceholders(sql);
 
+  const timeout = calculateTimeout(
+    params.timeout,
+    dbConfig.maxTimeout,
+    config.defaults.timeout
+  );
+
   const result = await adapter.withConnection(async (conn) => {
     return conn.query(sql, params.params ?? []);
-  });
+  }, { timeout });
 
   const columns = result.fields.map((field) => field.name);
   const rawRows = result.rows;

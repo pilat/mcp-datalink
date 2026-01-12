@@ -10,6 +10,7 @@ import pg from 'pg';
 import type {
   AdapterConfig,
   AdapterConnection,
+  ConnectionOptions,
   DatabaseAdapter,
   ListTablesInternalResult,
   RawQueryResult,
@@ -79,12 +80,17 @@ export class PostgreSqlAdapter implements DatabaseAdapter {
   /**
    * Execute a function with a managed PostgreSQL connection
    */
-  async withConnection<T>(fn: (conn: AdapterConnection) => Promise<T>): Promise<T> {
+  async withConnection<T>(
+    fn: (conn: AdapterConnection) => Promise<T>,
+    options?: ConnectionOptions
+  ): Promise<T> {
+    const timeout = options?.timeout ?? this.timeout;
+
     // Validate timeout before creating connection (SET command doesn't support parameters)
-    if (!Number.isInteger(this.timeout) || this.timeout < 0) {
+    if (!Number.isInteger(timeout) || timeout < 0) {
       throw new DbMcpError(
         ErrorCode.CONNECTION_FAILED,
-        `Invalid timeout value: ${this.timeout}`
+        `Invalid timeout value: ${timeout}`
       );
     }
 
@@ -105,7 +111,7 @@ export class PostgreSqlAdapter implements DatabaseAdapter {
         );
       }
 
-      await client.query(`SET statement_timeout = ${this.timeout}`);
+      await client.query(`SET statement_timeout = ${timeout}`);
 
       const connection = new PostgreSqlConnection(client);
       return await fn(connection);

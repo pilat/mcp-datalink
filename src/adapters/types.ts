@@ -19,11 +19,16 @@ export interface RawQueryResult {
   rowCount: number;
 }
 
+/** Options for withConnection */
+export interface ConnectionOptions {
+  timeout?: number;
+}
+
 /** Implemented by each database driver */
 export interface DatabaseAdapter {
   readonly type: 'postgresql' | 'mysql' | 'sqlite';
 
-  withConnection<T>(fn: (conn: AdapterConnection) => Promise<T>): Promise<T>;
+  withConnection<T>(fn: (conn: AdapterConnection) => Promise<T>, options?: ConnectionOptions): Promise<T>;
 
   /** PostgreSQL: "public", MySQL: db name from URL, SQLite: "main" */
   getDefaultSchema(): string;

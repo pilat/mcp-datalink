@@ -88,6 +88,63 @@ describe('loadConfig', () => {
     });
   });
 
+  describe('DATALINK_{NAME}_MAX_TIMEOUT', () => {
+    it('should set maxTimeout when MAX_TIMEOUT is specified', () => {
+      process.env.DATALINK_SLOW_URL = 'postgresql://localhost/slow';
+      process.env.DATALINK_SLOW_MAX_TIMEOUT = '120000';
+
+      const result = loadConfig();
+
+      expect(result.databases.slow.maxTimeout).toBe(120000);
+    });
+
+    it('should use undefined maxTimeout when MAX_TIMEOUT not set', () => {
+      process.env.DATALINK_FAST_URL = 'postgresql://localhost/fast';
+
+      const result = loadConfig();
+
+      expect(result.databases.fast.maxTimeout).toBeUndefined();
+    });
+
+    it('should ignore invalid MAX_TIMEOUT values', () => {
+      process.env.DATALINK_TEST_URL = 'postgresql://localhost/test';
+      process.env.DATALINK_TEST_MAX_TIMEOUT = 'invalid';
+
+      const result = loadConfig();
+
+      expect(result.databases.test.maxTimeout).toBeUndefined();
+    });
+
+    it('should ignore negative MAX_TIMEOUT values', () => {
+      process.env.DATALINK_TEST_URL = 'postgresql://localhost/test';
+      process.env.DATALINK_TEST_MAX_TIMEOUT = '-1000';
+
+      const result = loadConfig();
+
+      expect(result.databases.test.maxTimeout).toBeUndefined();
+    });
+
+    it('should ignore zero MAX_TIMEOUT', () => {
+      process.env.DATALINK_TEST_URL = 'postgresql://localhost/test';
+      process.env.DATALINK_TEST_MAX_TIMEOUT = '0';
+
+      const result = loadConfig();
+
+      expect(result.databases.test.maxTimeout).toBeUndefined();
+    });
+
+    it('should handle MAX_TIMEOUT with different databases', () => {
+      process.env.DATALINK_FAST_URL = 'postgresql://localhost/fast';
+      process.env.DATALINK_SLOW_URL = 'postgresql://localhost/slow';
+      process.env.DATALINK_SLOW_MAX_TIMEOUT = '300000';
+
+      const result = loadConfig();
+
+      expect(result.databases.fast.maxTimeout).toBeUndefined();
+      expect(result.databases.slow.maxTimeout).toBe(300000);
+    });
+  });
+
   describe('defaults', () => {
     it('should apply default values', () => {
       process.env.DATALINK_TEST_URL = 'postgresql://localhost/test';

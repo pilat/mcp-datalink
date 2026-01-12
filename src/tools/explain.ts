@@ -5,6 +5,9 @@
 import type { Config, ExplainParams, ExplainResult } from '../types.js';
 
 import { createAdapter } from '../adapters/index.js';
+import { DbMcpError, ErrorCode } from '../utils/errors.js';
+import { calculateTimeout } from '../utils/timeout.js';
+import { getValidatedDatabase } from '../utils/validation.js';
 
 /**
  * Format ExplainResult as Markdown
@@ -20,8 +23,6 @@ export function formatExplainResultAsMarkdown(result: ExplainResult): string {
 
   return parts.join('\n');
 }
-import { DbMcpError, ErrorCode } from '../utils/errors.js';
-import { getValidatedDatabase } from '../utils/validation.js';
 
 /**
  * Get the execution plan for a SQL query
@@ -51,6 +52,12 @@ export async function explain(
     );
   }
 
+  const timeout = calculateTimeout(
+    params.timeout,
+    dbConfig.maxTimeout,
+    config.defaults.timeout
+  );
+
   const result = await adapter.withConnection(async (conn) => {
     const explainPrefix = adapter.getExplainPrefix(params.analyze ?? false);
 
@@ -74,7 +81,7 @@ export async function explain(
       }
       throw new Error(String(error));
     }
-  });
+  }, { timeout });
 
   const planLines = result.rows.map((row) => {
     if (row.length === 0) {

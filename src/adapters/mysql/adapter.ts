@@ -11,6 +11,7 @@ import type { Connection as MySql2Connection, FieldPacket, RowDataPacket } from 
 import type {
   AdapterConfig,
   AdapterConnection,
+  ConnectionOptions,
   DatabaseAdapter,
   ListTablesInternalResult,
   RawQueryResult,
@@ -142,12 +143,17 @@ export class MySqlAdapter implements DatabaseAdapter {
   /**
    * Execute a function with a managed MySQL connection
    */
-  async withConnection<T>(fn: (conn: AdapterConnection) => Promise<T>): Promise<T> {
+  async withConnection<T>(
+    fn: (conn: AdapterConnection) => Promise<T>,
+    options?: ConnectionOptions
+  ): Promise<T> {
+    const timeout = options?.timeout ?? this.timeout;
+
     // Validate timeout before creating connection (SET command doesn't support parameters)
-    if (!Number.isInteger(this.timeout) || this.timeout < 0) {
+    if (!Number.isInteger(timeout) || timeout < 0) {
       throw new DbMcpError(
         ErrorCode.CONNECTION_FAILED,
-        `Invalid timeout value: ${this.timeout}`
+        `Invalid timeout value: ${timeout}`
       );
     }
 
@@ -167,7 +173,7 @@ export class MySqlAdapter implements DatabaseAdapter {
 
     try {
       try {
-        await connection.execute(`SET max_execution_time = ${this.timeout}`);
+        await connection.execute(`SET max_execution_time = ${timeout}`);
       } catch {
         // max_execution_time not supported (MySQL < 5.7.8)
       }

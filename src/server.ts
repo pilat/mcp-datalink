@@ -36,6 +36,7 @@ const SERVER_INSTRUCTIONS = `Database Query Workflow:
 4. Query Execution: Use query for SELECT statements, execute for INSERT/UPDATE/DELETE.
 5. Security: All queries must use parameterized placeholders ($1, $2, ...). Never interpolate values directly into SQL strings.
 6. Performance: Use explain to analyze query execution plans for optimization.
+7. Timeout: Default query timeout is 30 seconds. For slow queries (analytics, large aggregations), you can specify a longer timeout (up to 10 minutes) via the timeout parameter. The server may cap this to a lower value.
 
 The recommended sequence is: list_databases → list_tables → describe_table → query/execute.
 Skipping describe_table often leads to errors due to incorrect column names or types.`;
@@ -137,6 +138,14 @@ export function createServer(config: Config): Server {
                 'Parameter values corresponding to placeholders in order. ' +
                 'Example: ["active", "2024-01-01"] for $1 and $2',
             },
+            timeout: {
+              type: 'integer',
+              description:
+                'Query timeout in milliseconds. Default: 30000 (30 seconds). ' +
+                'May be capped by server configuration.',
+              minimum: 5000,
+              maximum: 600000,
+            },
           },
           required: ['database', 'sql'],
         },
@@ -164,6 +173,14 @@ export function createServer(config: Config): Server {
                 'Parameter values corresponding to placeholders in order. ' +
                 'Example: ["inactive", 123] for $1 and $2',
             },
+            timeout: {
+              type: 'integer',
+              description:
+                'Query timeout in milliseconds. Default: 30000 (30 seconds). ' +
+                'May be capped by server configuration.',
+              minimum: 5000,
+              maximum: 600000,
+            },
           },
           required: ['database', 'sql'],
         },
@@ -188,6 +205,14 @@ export function createServer(config: Config): Server {
               description:
                 'If true, actually execute the query to get real timing statistics (EXPLAIN ANALYZE). ' +
                 'If false, show estimated plan only. Default: false',
+            },
+            timeout: {
+              type: 'integer',
+              description:
+                'Query timeout in milliseconds. Default: 30000 (30 seconds). ' +
+                'May be capped by server configuration.',
+              minimum: 5000,
+              maximum: 600000,
             },
           },
           required: ['database', 'sql'],
