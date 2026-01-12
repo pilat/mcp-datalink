@@ -16,6 +16,7 @@ export interface DatabaseConfig {
   url: string;
   readonly: boolean;
   maxRows?: number;
+  maxTimeout?: number;
 }
 
 export interface DefaultsConfig {
@@ -121,18 +122,21 @@ export interface QueryParams {
   database: string;
   sql: string;
   params?: unknown[];
+  timeout?: number;
 }
 
 export interface ExecuteParams {
   database: string;
   sql: string;
   params?: unknown[];
+  timeout?: number;
 }
 
 export interface ExplainParams {
   database: string;
   sql: string;
   analyze?: boolean;
+  timeout?: number;
 }
 
 export interface ExplainResult {

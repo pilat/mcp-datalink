@@ -37,6 +37,7 @@ This creates three database connections: `analytics` (read-only), `inventory`, a
 |----------|-------------|
 | `DATALINK_{NAME}_URL` | Connection URL (creates database named `{name}`) |
 | `DATALINK_{NAME}_READONLY` | Set to `true` to block writes |
+| `DATALINK_{NAME}_MAX_TIMEOUT` | Max query timeout in ms (caps model requests) |
 
 **Connection URL formats:**
 
@@ -123,6 +124,7 @@ DATALINK_MAIN_URL="postgresql://localhost:${DB_PORT:-5432}/mydb"
 - DDL blocked (no DROP, ALTER, TRUNCATE)
 - Readonly mode per connection
 - Output truncation (100 rows, 64KB max)
+- Query timeout: 30s default, model can request up to 10min, `MAX_TIMEOUT` caps it
 
 ## License
 

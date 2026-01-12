@@ -587,6 +587,31 @@ describe('PostgreSqlAdapter connection handling', () => {
         adapter.withConnection(async () => 'result')
       ).rejects.toThrow('Invalid timeout value: 30.5');
     });
+
+    it('should use timeout from options when provided', async () => {
+      const adapter = new PostgreSqlAdapter(testConfig);
+      // This test verifies the signature accepts options parameter
+      // Actual timeout behavior is tested in integration tests
+      await expect(
+        adapter.withConnection(async () => 'result', { timeout: 60000 })
+      ).rejects.toThrow(); // Will fail because no real DB
+    });
+
+    it('should reject invalid timeout in options', async () => {
+      const adapter = new PostgreSqlAdapter(testConfig);
+
+      await expect(
+        adapter.withConnection(async () => 'result', { timeout: -1 })
+      ).rejects.toThrow('Invalid timeout value: -1');
+    });
+
+    it('should reject non-integer timeout in options', async () => {
+      const adapter = new PostgreSqlAdapter(testConfig);
+
+      await expect(
+        adapter.withConnection(async () => 'result', { timeout: 30.5 })
+      ).rejects.toThrow('Invalid timeout value: 30.5');
+    });
   });
 
   describe('getDefaultSchema', () => {

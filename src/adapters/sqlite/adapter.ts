@@ -10,6 +10,7 @@ import Database from 'better-sqlite3';
 import type {
   AdapterConfig,
   AdapterConnection,
+  ConnectionOptions,
   DatabaseAdapter,
   ListTablesInternalResult,
   RawQueryResult,
@@ -23,6 +24,7 @@ import type {
   TableInfo,
 } from '../../types.js';
 
+import { DbMcpError, ErrorCode } from '../../utils/errors.js';
 import {
   injectLimit as sharedInjectLimit,
   parseQuery as sharedParseQuery,
@@ -161,11 +163,24 @@ export class SqliteAdapter implements DatabaseAdapter {
     return result;
   }
 
-  async withConnection<T>(fn: (conn: AdapterConnection) => Promise<T>): Promise<T> {
+  async withConnection<T>(
+    fn: (conn: AdapterConnection) => Promise<T>,
+    options?: ConnectionOptions
+  ): Promise<T> {
+    const timeout = options?.timeout ?? this.timeout;
+
+    // Validate timeout before creating connection
+    if (!Number.isInteger(timeout) || timeout < 0) {
+      throw new DbMcpError(
+        ErrorCode.CONNECTION_FAILED,
+        `Invalid timeout value: ${timeout}`
+      );
+    }
+
     const db = new Database(this.dbPath, {
       readonly: this.readonly,
       // busy_timeout handles lock contention (different from query timeout)
-      timeout: this.timeout,
+      timeout,
     });
 
     try {

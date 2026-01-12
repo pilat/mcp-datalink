@@ -5,6 +5,9 @@
 import type { Config, ExecuteParams, ExecuteResult } from '../types.js';
 
 import { createAdapter } from '../adapters/index.js';
+import { DbMcpError, ErrorCode } from '../utils/errors.js';
+import { calculateTimeout } from '../utils/timeout.js';
+import { getValidatedDatabase, validateParamCount } from '../utils/validation.js';
 
 /**
  * Format ExecuteResult as Markdown
@@ -18,8 +21,6 @@ export function formatExecuteResultAsMarkdown(result: ExecuteResult): string {
 
   return parts.join('\n');
 }
-import { DbMcpError, ErrorCode } from '../utils/errors.js';
-import { getValidatedDatabase, validateParamCount } from '../utils/validation.js';
 
 /**
  * Execute an INSERT/UPDATE/DELETE statement
@@ -55,9 +56,15 @@ export async function execute(
   const command = parsed.type.toUpperCase();
   const sql = adapter.convertPlaceholders(params.sql);
 
+  const timeout = calculateTimeout(
+    params.timeout,
+    dbConfig.maxTimeout,
+    config.defaults.timeout
+  );
+
   const result = await adapter.withConnection(async (conn) => {
     return conn.query(sql, params.params ?? []);
-  });
+  }, { timeout });
 
   const executionTime = Date.now() - startTime;
 

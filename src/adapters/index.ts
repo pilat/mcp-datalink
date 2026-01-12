@@ -31,6 +31,7 @@ export type {
   RawQueryResult,
   AdapterConfig,
   ListTablesInternalResult,
+  ConnectionOptions,
 } from './types.js';
 
 // Factory

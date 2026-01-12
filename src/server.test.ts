@@ -176,6 +176,14 @@ describe('ListTools handler', () => {
             'Parameter values corresponding to placeholders in order. ' +
             'Example: ["active", "2024-01-01"] for $1 and $2',
         },
+        timeout: {
+          type: 'integer',
+          description:
+            'Query timeout in milliseconds. Default: 30000 (30 seconds). ' +
+            'May be capped by server configuration.',
+          minimum: 5000,
+          maximum: 600000,
+        },
       },
       required: ['database', 'sql'],
     });
