@@ -53,7 +53,7 @@
     "@testcontainers/mysql": "^11.11.0",
     "@testcontainers/postgresql": "^11.11.0",
     "@types/better-sqlite3": "^7.6.0",
-    "@types/node": "^20.0.0",
+    "@types/node": "^25.0.8",
     "@types/pg": "^8.11.0",
     "@vitest/coverage-v8": "^1.6.1",
     "eslint": "^9.39.2",
