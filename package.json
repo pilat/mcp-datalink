@@ -43,7 +43,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "better-sqlite3": "^11.7.0",
+    "better-sqlite3": "^12.6.0",
     "mysql2": "^3.6.0",
     "node-sql-parser": "^5.3.13",
     "pg": "^8.11.0"
