@@ -100,7 +100,7 @@ DATALINK_MAIN_URL="postgresql://localhost:${DB_PORT:-5432}/mydb"
 
 | Client | Config file |
 |--------|-------------|
-| Claude Code | `~/.claude/settings.local.json` (global) or `.mcp.json` (project) |
+| Claude Code | `~/.claude.json` (global) or `.mcp.json` (project) |
 | Claude Desktop (macOS) | `~/Library/Application Support/Claude/claude_desktop_config.json` |
 | Claude Desktop (Windows) | `%APPDATA%\Claude\claude_desktop_config.json` |
 | Cursor | `~/.cursor/mcp.json` or Settings → Features → MCP Servers |
