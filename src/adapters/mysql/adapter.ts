@@ -25,6 +25,10 @@ import type {
   TableInfo,
 } from '../../types.js';
 
+// mysql2 doesn't export ExecuteValues from its public API, so we mirror the subset
+// that actually arrives via MCP tool params (JSON primitives only).
+type MySqlParamValue = string | number | boolean | null;
+
 import { DbMcpError, ErrorCode } from '../../utils/errors.js';
 import {
   injectLimit as sharedInjectLimit,
@@ -202,7 +206,7 @@ class MySqlConnection implements AdapterConnection {
   async query(sql: string, params?: unknown[]): Promise<RawQueryResult> {
     const [result, fields] = await this.conn.execute<RowDataPacket[]>(
       sql,
-      params ?? []
+      (params ?? []) as MySqlParamValue[]
     );
 
     // For non-SELECT queries (INSERT/UPDATE/DELETE), fields is undefined
