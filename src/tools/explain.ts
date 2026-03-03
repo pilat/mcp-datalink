@@ -79,7 +79,7 @@ export async function explain(
       if (error instanceof Error) {
         throw error;
       }
-      throw new Error(String(error));
+      throw new Error(String(error), { cause: error });
     }
   }, { timeout });
 
