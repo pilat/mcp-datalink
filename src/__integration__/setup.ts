@@ -150,7 +150,7 @@ export async function getMySqlTestConnection(): Promise<mysql.Connection> {
 export async function execMySql(sql: string, params?: unknown[]): Promise<mysql.QueryResult> {
   const connection = await getMySqlTestConnection();
   try {
-    const [result] = await connection.execute(sql, params);
+    const [result] = await connection.execute(sql, params as (string | number | boolean | null)[]);
     return result;
   } finally {
     await connection.end();
