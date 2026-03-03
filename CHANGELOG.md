@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] - 2026-03-03
+
+### Security
+
+- Upgraded @modelcontextprotocol/sdk to 1.27.1 (includes cross-client data leak fix from 1.26.0, GHSA-345p-7cg4-v4c7)
+- Upgraded mysql2 to 3.18.0 (includes SQL injection bypass fix from 3.17.0)
+
+### Fixed
+
+- Error cause chain preserved when rethrowing non-Error exceptions
+
 ## [1.3.1] - 2026-01-16
 
 ### Changed
