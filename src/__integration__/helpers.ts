@@ -27,7 +27,6 @@ export function createTestConfig(overrides?: Partial<Config>): Config {
     },
     defaults: {
       maxRows: 100,
-      maxCellLength: 500,
       maxTotalSize: 65536,
       maxColumns: 50,
       maxTables: 200,
@@ -236,7 +235,6 @@ export function createSqliteTestConfig(overrides?: Partial<Config>): Config {
     },
     defaults: {
       maxRows: 100,
-      maxCellLength: 500,
       maxTotalSize: 65536,
       maxColumns: 50,
       maxTables: 200,
@@ -443,7 +441,6 @@ export function createMySqlTestConfig(overrides?: Partial<Config>): Config {
     },
     defaults: {
       maxRows: 100,
-      maxCellLength: 500,
       maxTotalSize: 65536,
       maxColumns: 50,
       maxTables: 200,

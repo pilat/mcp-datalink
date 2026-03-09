@@ -137,7 +137,6 @@ describe('describe_table integration', () => {
     const config = createTestConfig({
       defaults: {
         maxRows: 100,
-        maxCellLength: 500,
         maxTotalSize: 65536,
         maxColumns: 10,
         maxTables: 200,

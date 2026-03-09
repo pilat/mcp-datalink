@@ -153,13 +153,40 @@ describe('loadConfig', () => {
 
       expect(result.defaults).toEqual({
         maxRows: 100,
-        maxCellLength: 500,
         maxTotalSize: 65536,
         maxColumns: 50,
         maxTables: 200,
         maxIndexes: 20,
         timeout: 30000,
       });
+    });
+  });
+
+  describe('DATALINK_MAX_TOTAL_SIZE', () => {
+    it('should override default maxTotalSize', () => {
+      process.env.DATALINK_TEST_URL = 'postgresql://localhost/test';
+      process.env.DATALINK_MAX_TOTAL_SIZE = '32768';
+
+      const result = loadConfig();
+
+      expect(result.defaults.maxTotalSize).toBe(32768);
+    });
+
+    it('should use default when not set', () => {
+      process.env.DATALINK_TEST_URL = 'postgresql://localhost/test';
+
+      const result = loadConfig();
+
+      expect(result.defaults.maxTotalSize).toBe(65536);
+    });
+
+    it('should ignore invalid values', () => {
+      process.env.DATALINK_TEST_URL = 'postgresql://localhost/test';
+      process.env.DATALINK_MAX_TOTAL_SIZE = 'not-a-number';
+
+      const result = loadConfig();
+
+      expect(result.defaults.maxTotalSize).toBe(65536);
     });
   });
 

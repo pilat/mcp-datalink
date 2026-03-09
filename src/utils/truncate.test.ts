@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   truncateRows,
-  truncateCell,
   truncateColumns,
   checkTotalSize,
 } from './truncate.js';
@@ -76,123 +75,6 @@ describe('truncateRows', () => {
 
     expect(result.rows).toEqual(rows);
     expect(result.info.truncated).toBe(false);
-  });
-});
-
-describe('truncateCell', () => {
-  it('returns value as-is when under limit', () => {
-    const result = truncateCell('short text', 100);
-
-    expect(result.value).toBe('short text');
-    expect(result.truncated).toBe(false);
-    expect(result.originalLength).toBeUndefined();
-  });
-
-  it('truncates long strings with ellipsis', () => {
-    const longString = 'a'.repeat(100);
-    const result = truncateCell(longString, 10);
-
-    // maxLength includes ellipsis: 7 chars + '...' = 10
-    expect(result.value).toBe('aaaaaaa...');
-    expect(result.value.length).toBe(10);
-    expect(result.truncated).toBe(true);
-  });
-
-  it('tracks originalLength when truncated', () => {
-    const longString = 'x'.repeat(500);
-    const result = truncateCell(longString, 50);
-
-    expect(result.originalLength).toBe(500);
-  });
-
-  it('handles null', () => {
-    const result = truncateCell(null, 100);
-
-    expect(result.value).toBe('NULL');
-    expect(result.truncated).toBe(false);
-  });
-
-  it('handles undefined', () => {
-    const result = truncateCell(undefined, 100);
-
-    expect(result.value).toBe('NULL');
-    expect(result.truncated).toBe(false);
-  });
-
-  it('handles numbers', () => {
-    const result = truncateCell(12345, 100);
-
-    expect(result.value).toBe('12345');
-    expect(result.truncated).toBe(false);
-  });
-
-  it('handles booleans', () => {
-    expect(truncateCell(true, 100).value).toBe('true');
-    expect(truncateCell(false, 100).value).toBe('false');
-  });
-
-  it('handles objects by converting to JSON', () => {
-    const obj = { foo: 'bar', num: 42 };
-    const result = truncateCell(obj, 100);
-
-    expect(result.value).toBe('{"foo":"bar","num":42}');
-    expect(result.truncated).toBe(false);
-  });
-
-  it('handles Date objects', () => {
-    const date = new Date('2024-01-15T10:30:00.000Z');
-    const result = truncateCell(date, 100);
-
-    expect(result.value).toBe('2024-01-15T10:30:00.000Z');
-    expect(result.truncated).toBe(false);
-  });
-
-  it('truncates long JSON objects', () => {
-    const obj = { data: 'x'.repeat(100) };
-    const result = truncateCell(obj, 20);
-
-    expect(result.truncated).toBe(true);
-    // maxLength includes ellipsis: 17 chars + '...' = 20
-    expect(result.value.length).toBe(20);
-  });
-
-  it('handles exactly at limit', () => {
-    const result = truncateCell('12345', 5);
-
-    expect(result.value).toBe('12345');
-    expect(result.truncated).toBe(false);
-  });
-
-  it('handles object with nested BigInt values', () => {
-    const obj = { id: BigInt('9007199254740993'), name: 'test' };
-    const result = truncateCell(obj, 100);
-
-    expect(result.value).toBe('{"id":"9007199254740993","name":"test"}');
-    expect(result.truncated).toBe(false);
-  });
-
-  it('handles deeply nested BigInt values', () => {
-    const nested = { a: { b: { bigNum: BigInt('12345678901234567890') } } };
-    const result = truncateCell(nested, 100);
-
-    expect(result.value).toBe('{"a":{"b":{"bigNum":"12345678901234567890"}}}');
-    expect(result.truncated).toBe(false);
-  });
-
-  it('handles array with BigInt values', () => {
-    const arr = [BigInt(1), BigInt(2), BigInt('9007199254740993')];
-    const result = truncateCell(arr, 100);
-
-    expect(result.value).toBe('["1","2","9007199254740993"]');
-    expect(result.truncated).toBe(false);
-  });
-
-  it('truncates object with nested BigInt when over limit', () => {
-    const obj = { id: BigInt('9007199254740993'), name: 'test' };
-    const result = truncateCell(obj, 20);
-
-    expect(result.truncated).toBe(true);
-    expect(result.value.length).toBe(20);
   });
 });
 

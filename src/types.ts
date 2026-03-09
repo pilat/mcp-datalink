@@ -21,7 +21,6 @@ export interface DatabaseConfig {
 
 export interface DefaultsConfig {
   maxRows: number;
-  maxCellLength: number;
   maxTotalSize: number;
   maxColumns: number;
   maxTables: number;

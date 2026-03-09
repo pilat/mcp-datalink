@@ -65,7 +65,6 @@ describe('list_tables SQLite integration', () => {
     const config = createSqliteTestConfig({
       defaults: {
         maxRows: 100,
-        maxCellLength: 500,
         maxTotalSize: 65536,
         maxColumns: 50,
         maxTables: 3,

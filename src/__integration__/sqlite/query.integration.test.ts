@@ -83,7 +83,6 @@ describe('query SQLite integration', () => {
       const config = createSqliteTestConfig({
         defaults: {
           maxRows: 2,
-          maxCellLength: 500,
           maxTotalSize: 65536,
           maxColumns: 50,
           maxTables: 200,
@@ -207,7 +206,6 @@ describe('query SQLite integration', () => {
       const config = createSqliteTestConfig({
         defaults: {
           maxRows: 2,
-          maxCellLength: 500,
           maxTotalSize: 65536,
           maxColumns: 50,
           maxTables: 200,

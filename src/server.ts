@@ -23,7 +23,8 @@ import { explain, formatExplainResultAsMarkdown } from './tools/explain.js';
 import { formatListDatabasesResultAsMarkdown, listDatabases } from './tools/list-databases.js';
 import { formatListTablesResultAsMarkdown, listTables } from './tools/list-tables.js';
 import { formatQueryResultAsMarkdown, query } from './tools/query.js';
-import { DbMcpError } from './utils/errors.js';
+import { DbMcpError, ErrorCode } from './utils/errors.js';
+import { checkTotalSize } from './utils/truncate.js';
 
 /**
  * Server instructions for LLM agents.
@@ -225,71 +226,54 @@ export function createServer(config: Config): Server {
     const { name, arguments: args } = request.params;
 
     try {
+      let text: string;
+
       switch (name) {
         case 'list_databases': {
           const result = listDatabases(config);
-          return {
-            content: [{ type: 'text', text: formatListDatabasesResultAsMarkdown(result, config) }],
-          };
+          text = formatListDatabasesResultAsMarkdown(result, config);
+          break;
         }
         case 'list_tables': {
           const result = await listTables(args as unknown as ListTablesParams, config);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: formatListTablesResultAsMarkdown(result),
-              },
-            ],
-          };
+          text = formatListTablesResultAsMarkdown(result);
+          break;
         }
         case 'describe_table': {
           const result = await describeTable(args as unknown as DescribeTableParams, config);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: formatTableDescriptionAsMarkdown(result),
-              },
-            ],
-          };
+          text = formatTableDescriptionAsMarkdown(result);
+          break;
         }
         case 'query': {
           const result = await query(args as unknown as QueryParams, config);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: formatQueryResultAsMarkdown(result),
-              },
-            ],
-          };
+          text = formatQueryResultAsMarkdown(result);
+          break;
         }
         case 'execute': {
           const result = await execute(args as unknown as ExecuteParams, config);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: formatExecuteResultAsMarkdown(result),
-              },
-            ],
-          };
+          text = formatExecuteResultAsMarkdown(result);
+          break;
         }
         case 'explain': {
           const result = await explain(args as unknown as ExplainParams, config);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: formatExplainResultAsMarkdown(result),
-              },
-            ],
-          };
+          text = formatExplainResultAsMarkdown(result);
+          break;
         }
         default:
           throw new Error(`Unknown tool: ${name}`);
       }
+
+      const sizeCheck = checkTotalSize(text, config.defaults.maxTotalSize);
+      if (sizeCheck.info.truncated) {
+        const actualKB = Math.ceil(Buffer.byteLength(text, 'utf8') / 1024);
+        const limitKB = Math.ceil(config.defaults.maxTotalSize / 1024);
+        throw new DbMcpError(
+          ErrorCode.RESPONSE_TOO_LARGE,
+          `Response too large (${actualKB} KB). Limit is ${limitKB} KB. Try selecting fewer columns, adding a WHERE clause, or using LIMIT/OFFSET.`
+        );
+      }
+
+      return { content: [{ type: 'text', text }] };
     } catch (error: unknown) {
       if (error instanceof DbMcpError) {
         return {

@@ -11,7 +11,6 @@ import { SqliteAdapter } from './sqlite/adapter.js';
 const defaults = {
   timeout: 30000,
   maxRows: 1000,
-  maxCellLength: 1000,
   maxColumns: 50,
   maxIndexes: 20,
   maxTables: 200,

@@ -28,7 +28,6 @@ describe('query', () => {
     },
     defaults: {
       maxRows: 100,
-      maxCellLength: 500,
       maxTotalSize: 65536,
       maxColumns: 50,
       maxTables: 200,
@@ -290,8 +289,8 @@ describe('query', () => {
   });
 
   describe('truncation', () => {
-    it('should truncate cells when over maxCellLength', async () => {
-      const longText = 'x'.repeat(600); // Over default 500
+    it('should return full cell values without truncation', async () => {
+      const longText = 'x'.repeat(600);
       const params: QueryParams = {
         database: 'testdb',
         sql: 'SELECT content FROM posts',
@@ -306,11 +305,8 @@ describe('query', () => {
 
       const result = await query(params, mockConfig);
 
-      expect(result.truncated).toBe(true);
-      expect(result.truncationReason).toBe('maxCellLength');
-      // The cell should be truncated
-      expect((result.rows[0][0] as string).length).toBeLessThan(longText.length);
-      expect((result.rows[0][0] as string).endsWith('...')).toBe(true);
+      expect(result.truncated).toBe(false);
+      expect(result.rows[0][0]).toBe(longText);
     });
 
     it('should truncate rows when over maxRows', async () => {
@@ -333,9 +329,9 @@ describe('query', () => {
 
       expect(result.truncated).toBe(true);
       expect(result.truncationReason).toBe('maxRows');
-      expect(result.rowCount).toBe(100); // maxRows default
+      expect(result.rowCount).toBe(50); // database-specific maxRows
       expect(result.totalAvailable).toBe(150);
-      expect(result.returned).toBe(100);
+      expect(result.returned).toBe(50);
       expect(result.hint).toBe('Use LIMIT/OFFSET or WHERE clause to paginate');
     });
   });
