@@ -14,7 +14,6 @@ function createConfig(
     ),
     defaults: {
       maxRows: 100,
-      maxCellLength: 500,
       maxTotalSize: 65536,
       maxColumns: 50,
       maxTables: 200,

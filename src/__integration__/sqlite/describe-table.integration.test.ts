@@ -148,7 +148,6 @@ describe('describe_table SQLite integration', () => {
     const config = createSqliteTestConfig({
       defaults: {
         maxRows: 100,
-        maxCellLength: 500,
         maxTotalSize: 65536,
         maxColumns: 10,
         maxTables: 200,

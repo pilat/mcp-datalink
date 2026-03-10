@@ -32,7 +32,6 @@ const testConfig = {
   defaults: {
     timeout: 30000,
     maxRows: 1000,
-    maxCellLength: 1000,
     maxTotalSize: 100000,
     maxColumns: 100,
     maxIndexes: 50,
@@ -912,7 +911,6 @@ describe('SqliteAdapter with in-memory database', () => {
     defaults: {
       timeout: 30000,
       maxRows: 1000,
-      maxCellLength: 1000,
       maxTotalSize: 100000,
       maxColumns: 100,
       maxIndexes: 50,

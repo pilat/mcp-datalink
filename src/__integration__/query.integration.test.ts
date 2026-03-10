@@ -83,7 +83,6 @@ describe('query integration', () => {
       const config = createTestConfig({
         defaults: {
           maxRows: 2,
-          maxCellLength: 500,
           maxTotalSize: 65536,
           maxColumns: 50,
           maxTables: 200,
@@ -192,7 +191,6 @@ describe('query integration', () => {
       const config = createTestConfig({
         defaults: {
           maxRows: 2,
-          maxCellLength: 500,
           maxTotalSize: 65536,
           maxColumns: 50,
           maxTables: 200,

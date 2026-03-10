@@ -7,7 +7,7 @@ import type { Config, QueryParams, QueryResult } from '../types.js';
 import { createAdapter } from '../adapters/index.js';
 import { formatAsMarkdownTable, formatValue } from '../utils/formatter.js';
 import { calculateTimeout } from '../utils/timeout.js';
-import { truncateCell, truncateRows } from '../utils/truncate.js';
+import { truncateRows } from '../utils/truncate.js';
 import { getValidatedDatabase, validateParamCount } from '../utils/validation.js';
 
 /**
@@ -60,8 +60,9 @@ export async function query(
   const parsed = adapter.parseQuery(params.sql);
   let sql = params.sql;
 
+  const maxRows = dbConfig?.maxRows ?? config.defaults.maxRows;
+
   if (!parsed.hasLimit) {
-    const maxRows = dbConfig?.maxRows ?? config.defaults.maxRows;
     sql = adapter.injectLimit(params.sql, maxRows);
   }
 
@@ -80,34 +81,14 @@ export async function query(
   const columns = result.fields.map((field) => field.name);
   const rawRows = result.rows;
 
-  let formattedRows: string[][] = rawRows.map((row) =>
+  const formattedRows: string[][] = rawRows.map((row) =>
     row.map((cell) => formatValue(cell))
-  );
-
-  let anyCellTruncated = false;
-  formattedRows = formattedRows.map((row) =>
-    row.map((cell) => {
-      const truncated = truncateCell(cell, config.defaults.maxCellLength);
-      if (truncated.truncated) {
-        anyCellTruncated = true;
-      }
-      return truncated.value;
-    })
   );
 
   const { rows: truncatedRows, info: rowTruncationInfo } = truncateRows(
     formattedRows,
-    config.defaults.maxRows
+    maxRows
   );
-
-  const truncated = rowTruncationInfo.truncated || anyCellTruncated;
-
-  let truncationReason: string | undefined;
-  if (rowTruncationInfo.truncated) {
-    truncationReason = rowTruncationInfo.truncationReason;
-  } else if (anyCellTruncated) {
-    truncationReason = 'maxCellLength';
-  }
 
   const executionTime = Date.now() - startTime;
 
@@ -115,8 +96,8 @@ export async function query(
     columns,
     rows: truncatedRows as unknown[][],
     rowCount: truncatedRows.length,
-    truncated,
-    truncationReason,
+    truncated: rowTruncationInfo.truncated,
+    truncationReason: rowTruncationInfo.truncationReason,
     totalAvailable: rowTruncationInfo.totalAvailable,
     returned: rowTruncationInfo.returned,
     hint: rowTruncationInfo.hint,

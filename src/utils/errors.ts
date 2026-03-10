@@ -19,6 +19,9 @@ export const ErrorCode = {
 
   // Access errors
   READONLY_VIOLATION: 'READONLY_VIOLATION',
+
+  // Response errors
+  RESPONSE_TOO_LARGE: 'RESPONSE_TOO_LARGE',
 } as const;
 
 export type ErrorCodeType = typeof ErrorCode[keyof typeof ErrorCode];

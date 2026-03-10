@@ -25,7 +25,6 @@ export function expandEnvVariables(value: string): string {
 
 const DEFAULT_CONFIG: DefaultsConfig = {
   maxRows: 100,
-  maxCellLength: 500,
   maxTotalSize: 65536, // 64KB
   maxColumns: 50,
   maxTables: 200,
@@ -94,5 +93,13 @@ export function loadConfig(): Config {
     );
   }
 
-  return { databases, defaults: DEFAULT_CONFIG };
+  const maxTotalSize = parsePositiveInt(process.env['DATALINK_MAX_TOTAL_SIZE']);
+
+  return {
+    databases,
+    defaults: {
+      ...DEFAULT_CONFIG,
+      ...(maxTotalSize !== undefined && { maxTotalSize }),
+    },
+  };
 }

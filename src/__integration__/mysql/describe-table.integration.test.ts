@@ -125,7 +125,6 @@ describe('describe_table integration (MySQL)', () => {
     const config = createMySqlTestConfig({
       defaults: {
         maxRows: 100,
-        maxCellLength: 500,
         maxTotalSize: 65536,
         maxColumns: 10,
         maxTables: 200,

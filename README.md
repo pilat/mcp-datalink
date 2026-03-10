@@ -123,7 +123,7 @@ DATALINK_MAIN_URL="postgresql://localhost:${DB_PORT:-5432}/mydb"
 - Single statement per query (no chaining)
 - DDL blocked (no DROP, ALTER, TRUNCATE)
 - Readonly mode per connection
-- Output truncation (100 rows, 64KB max)
+- Response size limit (100 rows, 64KB default, configurable via `DATALINK_MAX_TOTAL_SIZE`)
 - Query timeout: 30s default, model can request up to 10min, `MAX_TIMEOUT` caps it
 
 ## License

@@ -81,7 +81,6 @@ const testConfig: Config = {
   },
   defaults: {
     maxRows: 100,
-    maxCellLength: 500,
     maxTotalSize: 65536,
     maxColumns: 50,
     maxTables: 200,
@@ -333,6 +332,33 @@ describe('Error handling', () => {
       message: 'Database "unknown" not found',
       details: { database: 'unknown' },
     });
+  });
+
+  it('returns RESPONSE_TOO_LARGE when response exceeds maxTotalSize', async () => {
+    const largeData = 'x'.repeat(20000);
+    mockQuery.mockResolvedValue({
+      columns: ['data'],
+      rows: [[largeData]],
+      rowCount: 1,
+      truncated: false,
+      executionTime: 10,
+    });
+
+    const smallLimitConfig: Config = {
+      ...testConfig,
+      defaults: { ...testConfig.defaults, maxTotalSize: 100 },
+    };
+
+    const server = createServer(smallLimitConfig);
+    const { callTool } = getServerHandlers(server);
+
+    const result = await callTool('query', { database: 'test_db', sql: 'SELECT data FROM big_table' });
+
+    expect(result.isError).toBe(true);
+    const errorJson = JSON.parse(result.content[0].text);
+    expect(errorJson.code).toBe('RESPONSE_TOO_LARGE');
+    expect(errorJson.message).toContain('Response too large');
+    expect(errorJson.message).toContain('Limit is');
   });
 
   it('re-throws non-DbMcpError errors', async () => {

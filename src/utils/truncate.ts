@@ -2,11 +2,9 @@
  * Truncation utilities for limiting MCP response sizes
  */
 
-import { safeJsonStringify } from './formatter.js';
-
 export interface TruncationInfo {
   truncated: boolean;
-  truncationReason?: 'maxRows' | 'maxCellLength' | 'maxTotalSize' | 'maxColumns';
+  truncationReason?: 'maxRows' | 'maxTotalSize' | 'maxColumns';
   totalAvailable?: number;
   returned?: number;
   hint?: string;
@@ -35,55 +33,6 @@ export function truncateRows(
       returned: maxRows,
       hint: 'Use LIMIT/OFFSET or WHERE clause to paginate',
     },
-  };
-}
-
-export function truncateCell(
-  value: unknown,
-  maxLength: number
-): { value: string; truncated: boolean; originalLength?: number } {
-  // Convert value to string
-  let stringValue: string;
-
-  if (value === null || value === undefined) {
-    stringValue = 'NULL';
-  } else if (typeof value === 'string') {
-    stringValue = value;
-  } else if (typeof value === 'number' || typeof value === 'boolean') {
-    stringValue = String(value);
-  } else if (value instanceof Date) {
-    stringValue = value.toISOString();
-  } else if (typeof value === 'object') {
-    stringValue = safeJsonStringify(value);
-  } else {
-    stringValue = String(value);
-  }
-
-  if (stringValue.length <= maxLength) {
-    return {
-      value: stringValue,
-      truncated: false,
-    };
-  }
-
-  // Account for ellipsis length (3 chars) when truncating
-  const ellipsis = '...';
-
-  // Edge case: if maxLength is too small for ellipsis, just truncate without it
-  if (maxLength < ellipsis.length) {
-    return {
-      value: stringValue.slice(0, maxLength),
-      truncated: true,
-      originalLength: stringValue.length,
-    };
-  }
-
-  const truncateAt = maxLength - ellipsis.length;
-
-  return {
-    value: stringValue.slice(0, truncateAt) + ellipsis,
-    truncated: true,
-    originalLength: stringValue.length,
   };
 }
 
