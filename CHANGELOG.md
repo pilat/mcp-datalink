@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-03-10
+
+### Changed
+
+- Replaced per-cell truncation (`maxCellLength: 500`) with a total response size cap — AI now sees full data or gets a clear error instead of silently truncated cells
+- Added `DATALINK_MAX_TOTAL_SIZE` environment variable to configure the response size limit (default: 64KB)
+
+### Fixed
+
+- Per-database `maxRows` setting now correctly applies to row truncation (previously only affected SQL LIMIT injection)
+
 ## [1.3.2] - 2026-03-03
 
 ### Security
