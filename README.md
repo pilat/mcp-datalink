@@ -106,6 +106,10 @@ DATALINK_MAIN_URL="postgresql://localhost:${DB_PORT:-5432}/mydb"
 | Cursor | `~/.cursor/mcp.json` or Settings → Features → MCP Servers |
 | Cline | `cline_mcp_settings.json` or VS Code settings `cline.mcpServers` |
 
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/pilat-mcp-datalink).
+
 ## Tools
 
 | Tool | Description |
